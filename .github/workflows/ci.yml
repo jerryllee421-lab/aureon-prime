@@ -44,11 +44,10 @@ jobs:
           rm -rf /tmp/ctrader-probe
           mkdir -p /tmp/ctrader-probe
           docker run --rm \
-            -v "/tmp/ctrader-probe:/workspace" \
-            -w /workspace \
+            -v "/tmp/ctrader-probe:/root/cAlgo" \
             ghcr.io/spotware/ctrader-console:latest \
             create cbot ProbeBot
-          find /tmp/ctrader-probe -maxdepth 3 -type f -print
+          find /tmp/ctrader-probe -maxdepth 5 -type f -print
           find /tmp/ctrader-probe -type f -name '*.csproj' -exec sh -c 'echo "=== $1 ==="; cat "$1"' _ {} \;
 
       - name: Build AUREON PRIME with cTrader CLI
