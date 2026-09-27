@@ -1,4 +1,5 @@
-purpose=AUREON controlled research matrix
+run=2
+purpose=AUREON controlled research matrix after PowerShell runner fix
 window=30 days
 scenarios=gold baseline; gold strict M5; BTC baseline
 credentials=investor read-only
