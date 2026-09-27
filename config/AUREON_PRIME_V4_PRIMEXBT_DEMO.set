@@ -10,3 +10,7 @@ InpPortfolioMaxOpenPositions=2||1||1||4||N
 InpPortfolioDailyLossPct=2.0||1.0||0.25||5.0||N
 InpPortfolioHardStopDDPct=8.0||4.0||0.5||12.0||N
 InpEnableTelemetry=true||false||0||true||N
+InpUseBitcoinManualRiskFallback=true||false||0||true||N
+InpBitcoinUSTUSDConversion=1.0||0.95||0.01||1.05||N
+InpBitcoinFallbackRiskSafetyMultiplier=1.05||1.00||0.01||1.20||N
+InpRequireBitcoinServerOrderCheck=true||false||0||true||N
