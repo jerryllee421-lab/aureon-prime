@@ -1,0 +1,30 @@
+{
+  "name": "FVG V2.12 R943k control",
+  "expert": "FVG_Scalper_V2_12_Research",
+  "symbol": "XAUUSD",
+  "period": "M1",
+  "from": "2026.09.01",
+  "to": "2026.09.24",
+  "currency": "ZAR",
+  "initial_deposit": 800,
+  "leverage": "1:100",
+  "net_profit": 942349.65,
+  "ending_balance": 943149.65,
+  "gross_profit": 1537576.73,
+  "gross_loss": -595227.08,
+  "profit_factor": 2.58,
+  "expected_payoff": 830.26,
+  "equity_drawdown_relative_pct": 21.55,
+  "total_trades": 1135,
+  "win_rate_pct": 64.41,
+  "short_trades": 403,
+  "short_win_rate_pct": 71.46,
+  "long_trades": 732,
+  "long_win_rate_pct": 60.52,
+  "history_quality_pct": 100,
+  "notes": [
+    "Ground truth is the Strategy Tester report, not source defaults.",
+    "Winning report overrides InpOneTradePerFVG=false.",
+    "Requested risk=2.0%, hard effective risk cap=1.25%, auto compounding enabled."
+  ]
+}
