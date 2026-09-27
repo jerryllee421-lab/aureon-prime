@@ -98,6 +98,33 @@ jobs:
           (Get-FileHash $ex5 -Algorithm SHA256).Hash | Set-Content "$artifact\ex5.sha256"
           'AUREON_PRIME_MT5_COMPILE_PASSED' | Set-Content "$artifact\status.txt"
 
+      - name: Compile broker probe script
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=$env:MT5_ROOT
+          $mql5=Join-Path $root 'MQL5'
+          $dir=Join-Path $mql5 'Scripts\\AUREON'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+
+          $src='mt5/AUREON_BrokerProbe.mq5'
+          $dest=Join-Path $dir 'AUREON_BrokerProbe.mq5'
+          Copy-Item $src $dest -Force
+
+          $meta=Join-Path $root 'metaeditor64.exe'
+          $p=Start-Process -FilePath $meta -ArgumentList @("/compile:$dest","/include:$mql5",'/log') -PassThru
+          if(-not $p.WaitForExit(180000)){ $p.Kill(); throw 'Broker probe compile timed out' }
+          Start-Sleep -Seconds 2
+
+          $ex5=[IO.Path]::ChangeExtension($dest,'.ex5')
+          $log=[IO.Path]::ChangeExtension($dest,'.log')
+          if(-not (Test-Path $log)){ throw 'Broker probe compile log missing' }
+
+          $txt=[Text.Encoding]::Unicode.GetString([IO.File]::ReadAllBytes($log))
+          Write-Host $txt
+          if(-not (Test-Path $ex5)){ throw 'Broker probe EX5 missing' }
+          if($txt -notmatch '0 errors'){ throw 'Broker probe compiler did not confirm zero errors' }
+
       - name: Upload compiled EA
         uses: actions/upload-artifact@v4
         with:
