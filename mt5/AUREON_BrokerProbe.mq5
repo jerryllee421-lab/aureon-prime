@@ -95,12 +95,20 @@ void OnStart()
       double sellTickProfit=0.0;
       double buyMargin=0.0;
 
+      bool buyCalcOK=false;
+      bool sellCalcOK=false;
+      bool marginCalcOK=false;
+
       if(tick.ask>0.0 && tickSize>0.0)
-         OrderCalcProfit(ORDER_TYPE_BUY,sym,1.0,tick.ask,tick.ask+tickSize,buyTickProfit);
+         buyCalcOK=OrderCalcProfit(ORDER_TYPE_BUY,sym,1.0,tick.ask,tick.ask+tickSize,buyTickProfit);
       if(tick.bid>0.0 && tickSize>0.0)
-         OrderCalcProfit(ORDER_TYPE_SELL,sym,1.0,tick.bid,tick.bid-tickSize,sellTickProfit);
+         sellCalcOK=OrderCalcProfit(ORDER_TYPE_SELL,sym,1.0,tick.bid,tick.bid-tickSize,sellTickProfit);
       if(tick.ask>0.0)
-         OrderCalcMargin(ORDER_TYPE_BUY,sym,1.0,tick.ask,buyMargin);
+         marginCalcOK=OrderCalcMargin(ORDER_TYPE_BUY,sym,1.0,tick.ask,buyMargin);
+
+      if(!buyCalcOK) buyTickProfit=0.0;
+      if(!sellCalcOK) sellTickProfit=0.0;
+      if(!marginCalcOK) buyMargin=0.0;
 
       FileWrite(h,
          accountMode,currency,leverage,server,
