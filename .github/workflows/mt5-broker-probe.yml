@@ -1,0 +1,119 @@
+name: AUREON MT5 Broker Probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  MT5_INSTALLER_URL: https://download.terminal.free/cdn/web/metaquotes.ltd/mt5/mt5setup.exe
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Require secure read-only demo credentials
+        shell: pwsh
+        env:
+          MT5_LOGIN: ${{ secrets.MT5_DEMO_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_DEMO_INVESTOR_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_DEMO_SERVER }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if([string]::IsNullOrWhiteSpace($env:MT5_LOGIN)){ throw 'Missing MT5_DEMO_LOGIN secret' }
+          if([string]::IsNullOrWhiteSpace($env:MT5_PASSWORD)){ throw 'Missing MT5_DEMO_INVESTOR_PASSWORD secret' }
+          if([string]::IsNullOrWhiteSpace($env:MT5_SERVER)){ throw 'Missing MT5_DEMO_SERVER secret' }
+
+      - name: Install official MetaTrader 5
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root='C:\AUREON_MT5'
+          $installer=Join-Path $env:RUNNER_TEMP 'mt5setup.exe'
+          Invoke-WebRequest -Uri $env:MT5_INSTALLER_URL -OutFile $installer
+          $p=Start-Process -FilePath $installer -ArgumentList @('/auto',"/path:$root") -PassThru
+          if(-not $p.WaitForExit(600000)){ $p.Kill(); throw 'MT5 installer timed out' }
+          $deadline=(Get-Date).AddMinutes(3)
+          while((Get-Date) -lt $deadline -and -not (Test-Path "$root\metaeditor64.exe")){ Start-Sleep -Seconds 2 }
+          if(-not (Test-Path "$root\metaeditor64.exe")){ throw 'MetaEditor not found' }
+          "MT5_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          & "$root\terminal64.exe" /portable
+          Start-Sleep -Seconds 8
+          Get-Process terminal64 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+      - name: Compile read-only broker probe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=$env:MT5_ROOT
+          $mql5=Join-Path $root 'MQL5'
+          $dir=Join-Path $mql5 'Scripts\AUREON'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $src='mt5/AUREON_BrokerProbe.mq5'
+          $dest=Join-Path $dir 'AUREON_BrokerProbe.mq5'
+          Copy-Item $src $dest -Force
+          $meta=Join-Path $root 'metaeditor64.exe'
+          $p=Start-Process -FilePath $meta -ArgumentList @("/compile:$dest","/include:$mql5",'/log') -PassThru
+          if(-not $p.WaitForExit(180000)){ $p.Kill(); throw 'Probe compile timed out' }
+          $ex5=[IO.Path]::ChangeExtension($dest,'.ex5')
+          $log=[IO.Path]::ChangeExtension($dest,'.log')
+          if(-not (Test-Path $ex5)){ throw 'Probe compilation did not produce EX5' }
+          if(Test-Path $log){
+            $txt=[Text.Encoding]::Unicode.GetString([IO.File]::ReadAllBytes($log))
+            Write-Host $txt
+            if($txt -notmatch '0 errors'){ throw 'Probe compile failed' }
+          }
+
+      - name: Connect read-only and capture broker specification
+        shell: pwsh
+        env:
+          MT5_LOGIN: ${{ secrets.MT5_DEMO_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_DEMO_INVESTOR_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_DEMO_SERVER }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=$env:MT5_ROOT
+          $mql5=Join-Path $root 'MQL5'
+          $artifact='broker_probe_artifact'
+          New-Item -ItemType Directory -Force -Path $artifact | Out-Null
+
+          $cfg=Join-Path $env:RUNNER_TEMP 'aureon-broker-probe.ini'
+          @"
+          [Common]
+          Login=$($env:MT5_LOGIN)
+          Password=$($env:MT5_PASSWORD)
+          Server=$($env:MT5_SERVER)
+          NewsEnable=0
+          CertInstall=0
+
+          [StartUp]
+          Symbol=EURUSD
+          Period=M1
+          Script=AUREON\AUREON_BrokerProbe
+          ShutdownTerminal=1
+          "@ | Set-Content -Path $cfg -Encoding Unicode
+
+          $terminal=Join-Path $root 'terminal64.exe'
+          $p=Start-Process -FilePath $terminal -ArgumentList @('/portable',"/config:$cfg") -PassThru
+          if(-not $p.WaitForExit(300000)){ $p.Kill(); throw 'Broker probe terminal run timed out' }
+
+          $result=Join-Path $mql5 'Files\AUREON_BROKER_PROBE.csv'
+          if(-not (Test-Path $result)){ throw 'Broker probe output not produced' }
+
+          Copy-Item $result "$artifact\AUREON_BROKER_PROBE.csv"
+          'READ_ONLY_INVESTOR_LOGIN' | Set-Content "$artifact\mode.txt"
+          'NO_ORDERS_SENT' | Set-Content "$artifact\safety.txt"
+
+      - name: Upload broker specification
+        uses: actions/upload-artifact@v4
+        with:
+          name: AUREON_MT5_BROKER_PROBE
+          path: broker_probe_artifact
+          retention-days: 7
+          if-no-files-found: error
