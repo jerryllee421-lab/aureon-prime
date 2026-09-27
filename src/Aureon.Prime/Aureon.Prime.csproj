@@ -16,6 +16,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../Aureon.Core/Aureon.Core.csproj" />
+    <Compile Include="../Aureon.Core/**/*.cs" LinkBase="Core" />
   </ItemGroup>
 </Project>
