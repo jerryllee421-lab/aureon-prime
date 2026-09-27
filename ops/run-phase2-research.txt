@@ -1,0 +1,5 @@
+purpose=AUREON Phase 2 asymmetric research
+window=30 days
+scenarios=Gold M5 long-only; Gold M15 long-only; BTC relaxed-spread candidate
+credentials=investor read-only
+broker_orders=none
