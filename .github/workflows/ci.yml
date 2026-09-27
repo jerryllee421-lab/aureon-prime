@@ -1,0 +1,58 @@
+name: AUREON PRIME CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aureon-prime-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore safety tests
+        run: dotnet restore tests/Aureon.Core.SmokeTests/Aureon.Core.SmokeTests.csproj
+
+      - name: Run safety tests
+        run: dotnet run --project tests/Aureon.Core.SmokeTests/Aureon.Core.SmokeTests.csproj -c Release --no-restore
+
+      - name: Restore cTrader cBot
+        run: dotnet restore src/Aureon.Prime/Aureon.Prime.csproj
+
+      - name: Build AUREON PRIME
+        run: dotnet build src/Aureon.Prime/Aureon.Prime.csproj -c Release --no-restore -p:AlgoPublish=false
+
+      - name: Locate .algo package
+        id: algo
+        shell: bash
+        run: |
+          FILE="$(find src/Aureon.Prime/bin/Release -type f -name '*.algo' -print -quit)"
+          test -n "$FILE"
+          echo "file=$FILE" >> "$GITHUB_OUTPUT"
+          echo "Built $FILE"
+
+      - name: Upload validated package
+        if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: AUREON_PRIME
+          path: ${{ steps.algo.outputs.file }}
+          if-no-files-found: error
+          retention-days: 7
