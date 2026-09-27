@@ -1,0 +1,233 @@
+name: AUREON PRIME MT5 Broker Backtest
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'ops/run-broker-backtest.txt'
+
+permissions:
+  contents: read
+
+env:
+  MT5_INSTALLER_URL: https://download.terminal.free/cdn/web/pxbt.trading.ltd/mt5/pxbttrading5setup.exe
+  EA_SOURCE: mt5/AUREON_PRIME_MT5_V4_MULTI_ASSET.mq5
+  GOLD_SYMBOL: XAUUSD
+  BTC_SYMBOL: BTCUSDT
+
+jobs:
+  backtest:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Require read-only demo credentials
+        shell: pwsh
+        env:
+          MT5_LOGIN: ${{ secrets.MT5_DEMO_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_DEMO_INVESTOR_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_DEMO_SERVER }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if([string]::IsNullOrWhiteSpace($env:MT5_LOGIN)){ throw 'Missing MT5_DEMO_LOGIN secret' }
+          if([string]::IsNullOrWhiteSpace($env:MT5_PASSWORD)){ throw 'Missing MT5_DEMO_INVESTOR_PASSWORD secret' }
+          if([string]::IsNullOrWhiteSpace($env:MT5_SERVER)){ throw 'Missing MT5_DEMO_SERVER secret' }
+
+      - name: Install PrimeXBT MetaTrader 5
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root='C:\AUREON_MT5'
+          $installer=Join-Path $env:RUNNER_TEMP 'pxbttrading5setup.exe'
+          Invoke-WebRequest -Uri $env:MT5_INSTALLER_URL -OutFile $installer
+          if((Get-Item $installer).Length -lt 100000){ throw 'MT5 installer download is unexpectedly small' }
+
+          $p=Start-Process -FilePath $installer -ArgumentList @('/auto',"/path:$root") -PassThru
+          if(-not $p.WaitForExit(600000)){ $p.Kill(); throw 'MT5 installer timed out' }
+
+          $deadline=(Get-Date).AddMinutes(3)
+          while((Get-Date) -lt $deadline -and -not (Test-Path "$root\metaeditor64.exe")){ Start-Sleep -Seconds 2 }
+          if(-not (Test-Path "$root\metaeditor64.exe")){ throw 'MetaEditor not found after install' }
+
+          "MT5_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          & "$root\terminal64.exe" /portable
+          Start-Sleep -Seconds 8
+          Get-Process terminal64 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+      - name: Compile current AUREON EA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=$env:MT5_ROOT
+          $mql5=Join-Path $root 'MQL5'
+          $destDir=Join-Path $mql5 'Experts\AUREON'
+          New-Item -ItemType Directory -Force -Path $destDir | Out-Null
+
+          $dest=Join-Path $destDir 'AUREON_PRIME_MT5_V4_MULTI_ASSET.mq5'
+          Copy-Item $env:EA_SOURCE $dest -Force
+
+          $meta=Join-Path $root 'metaeditor64.exe'
+          $p=Start-Process -FilePath $meta -ArgumentList @("/compile:$dest","/include:$mql5",'/log') -PassThru
+          if(-not $p.WaitForExit(180000)){ $p.Kill(); throw 'MetaEditor compile timed out' }
+          Start-Sleep -Seconds 2
+
+          $ex5=[IO.Path]::ChangeExtension($dest,'.ex5')
+          $log=[IO.Path]::ChangeExtension($dest,'.log')
+          if(-not (Test-Path $ex5)){ throw 'EA compile did not produce EX5' }
+          if(-not (Test-Path $log)){ throw 'EA compile log missing' }
+
+          $txt=[Text.Encoding]::Unicode.GetString([IO.File]::ReadAllBytes($log))
+          Write-Host $txt
+          if($txt -notmatch '0 errors'){ throw 'EA compile failed' }
+          if($txt -notmatch '0 warnings'){ throw 'EA compile produced warnings' }
+
+      - name: Synchronize PrimeXBT broker history
+        shell: pwsh
+        env:
+          MT5_LOGIN: ${{ secrets.MT5_DEMO_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_DEMO_INVESTOR_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_DEMO_SERVER }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=$env:MT5_ROOT
+          $cfg=Join-Path $env:RUNNER_TEMP 'aureon-history-sync.ini'
+
+          @"
+          [Common]
+          Login=$($env:MT5_LOGIN)
+          Password=$($env:MT5_PASSWORD)
+          Server=$($env:MT5_SERVER)
+          KeepPrivate=0
+          NewsEnable=0
+          CertInstall=0
+
+          [Charts]
+          MaxBars=500000
+
+          [Experts]
+          AllowLiveTrading=0
+          AllowDllImport=0
+          Enabled=0
+          "@ | Set-Content -Path $cfg -Encoding Unicode
+
+          $terminal=Join-Path $root 'terminal64.exe'
+          $p=Start-Process -FilePath $terminal -ArgumentList @('/portable',"/config:$cfg") -PassThru
+          Start-Sleep -Seconds 35
+          if(-not $p.HasExited){ $p.Kill() }
+          Get-Process terminal64 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+      - name: Run 30-day multi-asset broker backtest
+        shell: pwsh
+        env:
+          MT5_LOGIN: ${{ secrets.MT5_DEMO_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_DEMO_INVESTOR_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_DEMO_SERVER }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=$env:MT5_ROOT
+          $testerDir=Join-Path $root 'MQL5\Profiles\Tester'
+          $reportDir=Join-Path $root 'reports'
+          $artifact='broker_backtest_artifact'
+          New-Item -ItemType Directory -Force -Path $testerDir,$reportDir,$artifact | Out-Null
+
+          $setFile=Join-Path $testerDir 'AUREON_PRIME_V4_TEST.set'
+          @"
+          InpExecutionArmed=true||false||0||true||N
+          InpDemoOnly=true||false||0||true||N
+          InpEnableGold=true||false||0||true||N
+          InpEnableBitcoin=true||false||0||true||N
+          InpGoldSymbol=XAUUSD
+          InpBitcoinSymbol=BTCUSDT
+          InpGoldRiskPct=0.50||0.10||0.05||1.00||N
+          InpBitcoinRiskPct=0.35||0.10||0.05||1.00||N
+          InpPortfolioMaxOpenPositions=2||1||1||4||N
+          InpPortfolioDailyLossPct=2.0||1.0||0.25||5.0||N
+          InpPortfolioHardStopDDPct=8.0||4.0||0.5||12.0||N
+          InpUseBitcoinManualRiskFallback=true||false||0||true||N
+          InpBitcoinUSTUSDConversion=1.0||0.95||0.01||1.05||N
+          InpBitcoinFallbackRiskSafetyMultiplier=1.05||1.00||0.01||1.20||N
+          InpRequireBitcoinServerOrderCheck=true||false||0||true||N
+          InpEnableTelemetry=false||false||0||true||N
+          "@ | Set-Content -Path $setFile -Encoding Unicode
+
+          $to=(Get-Date).Date.AddDays(-1)
+          $from=$to.AddDays(-30)
+          $cfg=Join-Path $env:RUNNER_TEMP 'aureon-backtest.ini'
+
+          @"
+          [Common]
+          Login=$($env:MT5_LOGIN)
+          Password=$($env:MT5_PASSWORD)
+          Server=$($env:MT5_SERVER)
+          KeepPrivate=0
+          NewsEnable=0
+          CertInstall=0
+
+          [Experts]
+          AllowLiveTrading=0
+          AllowDllImport=0
+          Enabled=1
+          Account=0
+          Profile=0
+
+          [Tester]
+          Expert=AUREON\AUREON_PRIME_MT5_V4_MULTI_ASSET
+          ExpertParameters=AUREON_PRIME_V4_TEST.set
+          Symbol=XAUUSD
+          Period=M1
+          Deposit=10000
+          Currency=USD
+          Leverage=100
+          Model=1
+          ExecutionMode=0
+          Optimization=0
+          ForwardMode=0
+          UseCloud=0
+          Visual=0
+          FromDate=$($from.ToString('yyyy.MM.dd'))
+          ToDate=$($to.ToString('yyyy.MM.dd'))
+          Report=reports\aureon_v4_30d
+          ReplaceReport=1
+          ShutdownTerminal=1
+          "@ | Set-Content -Path $cfg -Encoding Unicode
+
+          $terminal=Join-Path $root 'terminal64.exe'
+          $p=Start-Process -FilePath $terminal -ArgumentList @('/portable',"/config:$cfg") -PassThru
+          if(-not $p.WaitForExit(2100000)){ $p.Kill(); throw 'Strategy Tester timed out' }
+          Start-Sleep -Seconds 5
+
+          $report=Join-Path $root 'reports\aureon_v4_30d.htm'
+          if(-not (Test-Path $report)){
+            $alt=Get-ChildItem -Path $root -Recurse -Filter 'aureon_v4_30d*.htm' -ErrorAction SilentlyContinue | Select-Object -First 1
+            if($alt){ $report=$alt.FullName }
+          }
+          if(-not (Test-Path $report)){ throw 'Strategy Tester did not produce HTML report' }
+
+          Copy-Item $report "$artifact\aureon_v4_30d.htm"
+          Copy-Item $env:EA_SOURCE "$artifact\AUREON_PRIME_MT5_V4_MULTI_ASSET.mq5"
+          @"
+          period_days=30
+          model=1_minute_ohlc
+          from=$($from.ToString('yyyy.MM.dd'))
+          to=$($to.ToString('yyyy.MM.dd'))
+          primary_symbol=XAUUSD
+          secondary_symbol=BTCUSDT
+          deposit=10000
+          currency=USD
+          leverage=1:100
+          credentials=INVESTOR_READ_ONLY
+          broker_orders_sent=NO
+          "@ | Set-Content "$artifact\manifest.txt" -Encoding utf8
+
+      - name: Upload backtest evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: AUREON_PRIME_MT5_BROKER_BACKTEST_30D
+          path: broker_backtest_artifact
+          retention-days: 14
+          if-no-files-found: error

@@ -1244,6 +1244,7 @@ bool TradingAllowed(AssetState &a)
       return false;
 
    if(InpDemoOnly &&
+      !MQLInfoInteger(MQL_TESTER) &&
       (ENUM_ACCOUNT_TRADE_MODE)AccountInfoInteger(ACCOUNT_TRADE_MODE)!=ACCOUNT_TRADE_MODE_DEMO)
       return false;
 
