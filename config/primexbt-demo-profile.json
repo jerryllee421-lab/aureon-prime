@@ -14,23 +14,39 @@
     "digits": 2,
     "point": 0.01,
     "tick_size": 0.01,
-    "tick_value_probe": 1.0,
-    "contract_size": 100.0,
+    "tick_value_probe": 1,
+    "contract_size": 100,
     "volume_min": 0.01,
     "volume_step": 0.01,
-    "volume_max": 50.0,
+    "volume_max": 50,
     "stops_level_points": 0,
     "freeze_level_points": 0,
     "spread_float": true,
     "swap_long_probe": -8.9998,
     "swap_short_probe": -0.1092,
     "sessions_server_time": {
-      "sunday": ["22:01-00:00"],
-      "monday": ["00:00-20:59", "22:01-00:00"],
-      "tuesday": ["00:00-20:59", "22:01-00:00"],
-      "wednesday": ["00:00-20:59", "22:01-00:00"],
-      "thursday": ["00:00-20:59", "22:01-00:00"],
-      "friday": ["00:00-20:59"],
+      "sunday": [
+        "22:01-00:00"
+      ],
+      "monday": [
+        "00:00-20:59",
+        "22:01-00:00"
+      ],
+      "tuesday": [
+        "00:00-20:59",
+        "22:01-00:00"
+      ],
+      "wednesday": [
+        "00:00-20:59",
+        "22:01-00:00"
+      ],
+      "thursday": [
+        "00:00-20:59",
+        "22:01-00:00"
+      ],
+      "friday": [
+        "00:00-20:59"
+      ],
       "saturday": []
     }
   },
@@ -40,25 +56,52 @@
     "digits": 1,
     "point": 0.1,
     "tick_size": 0.1,
-    "tick_value_probe": 0.0,
+    "tick_value_probe": 0,
     "tick_value_note": "Initial catalogue probe ran before quote synchronization. AUREON sizes with OrderCalcProfit at runtime rather than trusting this static field.",
-    "contract_size": 1.0,
+    "contract_size": 1,
     "volume_min": 0.001,
     "volume_step": 0.001,
-    "volume_max": 30.0,
+    "volume_max": 30,
     "stops_level_points": 0,
     "freeze_level_points": 0,
     "spread_float": true,
     "swap_long_probe": -52.9615,
     "swap_short_probe": 3.65,
     "sessions_server_time": {
-      "sunday": ["00:00-00:00"],
-      "monday": ["00:00-00:00"],
-      "tuesday": ["00:00-00:00"],
-      "wednesday": ["00:00-00:00"],
-      "thursday": ["00:00-00:00"],
-      "friday": ["00:00-00:00"],
-      "saturday": ["00:00-00:00"]
+      "sunday": [
+        "00:00-00:00"
+      ],
+      "monday": [
+        "00:00-00:00"
+      ],
+      "tuesday": [
+        "00:00-00:00"
+      ],
+      "wednesday": [
+        "00:00-00:00"
+      ],
+      "thursday": [
+        "00:00-00:00"
+      ],
+      "friday": [
+        "00:00-00:00"
+      ],
+      "saturday": [
+        "00:00-00:00"
+      ]
+    },
+    "calc_profit_currency": "UST",
+    "calc_mode": 4,
+    "calc_1tick_buy_profit": 0,
+    "calc_1tick_sell_profit": 0,
+    "calc_margin_buy_1lot": 0,
+    "runtime_sizing_policy": {
+      "broker_calc_status": "client-side OrderCalcProfit/OrderCalcMargin return zero on synchronized BTCUSDT",
+      "fallback_formula": "abs(entry-stop) * contract_size * volume * USTUSD_factor * safety_multiplier",
+      "ust_usd_factor": 1,
+      "risk_safety_multiplier": 1.05,
+      "require_server_order_check": true,
+      "fail_closed": true
     }
   },
   "disabled_catalogue_symbols": [
@@ -66,10 +109,10 @@
     "BTCUST"
   ],
   "risk_defaults": {
-    "gold_base_risk_pct": 0.50,
+    "gold_base_risk_pct": 0.5,
     "bitcoin_base_risk_pct": 0.35,
-    "portfolio_daily_loss_stop_pct": 2.0,
-    "portfolio_peak_drawdown_hard_stop_pct": 8.0,
+    "portfolio_daily_loss_stop_pct": 2,
+    "portfolio_peak_drawdown_hard_stop_pct": 8,
     "max_open_positions": 2
   }
 }
