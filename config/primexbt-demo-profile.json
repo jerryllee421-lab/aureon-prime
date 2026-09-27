@@ -1,0 +1,75 @@
+{
+  "profile": "PrimeXBT PXBTTrading-1 demo",
+  "validated_utc": "2026-09-27T10:54:49Z",
+  "account_currency": "USD",
+  "account_trade_mode": "DEMO",
+  "execution_policy": {
+    "demo_only": true,
+    "source_execution_armed_default": false,
+    "live_money_allowed": false
+  },
+  "gold": {
+    "symbol": "XAUUSD",
+    "trade_mode": "FULL",
+    "digits": 2,
+    "point": 0.01,
+    "tick_size": 0.01,
+    "tick_value_probe": 1.0,
+    "contract_size": 100.0,
+    "volume_min": 0.01,
+    "volume_step": 0.01,
+    "volume_max": 50.0,
+    "stops_level_points": 0,
+    "freeze_level_points": 0,
+    "spread_float": true,
+    "swap_long_probe": -8.9998,
+    "swap_short_probe": -0.1092,
+    "sessions_server_time": {
+      "sunday": ["22:01-00:00"],
+      "monday": ["00:00-20:59", "22:01-00:00"],
+      "tuesday": ["00:00-20:59", "22:01-00:00"],
+      "wednesday": ["00:00-20:59", "22:01-00:00"],
+      "thursday": ["00:00-20:59", "22:01-00:00"],
+      "friday": ["00:00-20:59"],
+      "saturday": []
+    }
+  },
+  "bitcoin": {
+    "symbol": "BTCUSDT",
+    "trade_mode": "FULL",
+    "digits": 1,
+    "point": 0.1,
+    "tick_size": 0.1,
+    "tick_value_probe": 0.0,
+    "tick_value_note": "Initial catalogue probe ran before quote synchronization. AUREON sizes with OrderCalcProfit at runtime rather than trusting this static field.",
+    "contract_size": 1.0,
+    "volume_min": 0.001,
+    "volume_step": 0.001,
+    "volume_max": 30.0,
+    "stops_level_points": 0,
+    "freeze_level_points": 0,
+    "spread_float": true,
+    "swap_long_probe": -52.9615,
+    "swap_short_probe": 3.65,
+    "sessions_server_time": {
+      "sunday": ["00:00-00:00"],
+      "monday": ["00:00-00:00"],
+      "tuesday": ["00:00-00:00"],
+      "wednesday": ["00:00-00:00"],
+      "thursday": ["00:00-00:00"],
+      "friday": ["00:00-00:00"],
+      "saturday": ["00:00-00:00"]
+    }
+  },
+  "disabled_catalogue_symbols": [
+    "BTCUSD",
+    "BTCUST"
+  ],
+  "risk_defaults": {
+    "gold_base_risk_pct": 0.50,
+    "bitcoin_base_risk_pct": 0.35,
+    "portfolio_daily_loss_stop_pct": 2.0,
+    "portfolio_peak_drawdown_hard_stop_pct": 8.0,
+    "max_open_positions": 2
+  }
+}
