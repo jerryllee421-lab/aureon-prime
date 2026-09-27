@@ -1,0 +1,5 @@
+purpose=Gold EDGE-01 liquidity sweep reclaim MSS FVG research
+window=360 days
+scenarios=tight structure; standard structure; standard fixed 2R
+credentials=investor read-only
+broker_orders=none
