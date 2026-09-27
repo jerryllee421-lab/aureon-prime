@@ -22,8 +22,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  MT5_INSTALLER_URL: https://download.terminal.free/cdn/web/metaquotes.ltd/mt5/mt5setup.exe
-  EA_SOURCE: mt5/AUREON_PRIME_MT5_V3_00_DUAL_ASSET.mq5
+  MT5_INSTALLER_URL: https://download.terminal.free/cdn/web/pxbt.trading.ltd/mt5/pxbttrading5setup.exe
+  EA_SOURCE: mt5/AUREON_PRIME_MT5_V4_MULTI_ASSET.mq5
 
 jobs:
   compile:
@@ -36,7 +36,7 @@ jobs:
 
       - name: Validate source safety
         shell: pwsh
-        run: python scripts/validate-mt5-source.py
+        run: python scripts/validate-mt5-source.py $env:EA_SOURCE
 
       - name: Install official MetaTrader 5
         shell: pwsh
@@ -72,7 +72,7 @@ jobs:
 
           New-Item -ItemType Directory -Force -Path $destDir,$artifact | Out-Null
 
-          $dest=Join-Path $destDir 'AUREON_PRIME_MT5_V3_00_DUAL_ASSET.mq5'
+          $dest=Join-Path $destDir 'AUREON_PRIME_MT5_V4_MULTI_ASSET.mq5'
           Copy-Item $env:EA_SOURCE $dest -Force
 
           $meta=Join-Path $root 'metaeditor64.exe'
@@ -92,8 +92,8 @@ jobs:
           if(-not (Test-Path $ex5)){ throw 'Compilation did not produce EX5' }
           if($txt -notmatch '0 errors'){ throw 'Compiler did not confirm zero errors' }
 
-          Copy-Item $env:EA_SOURCE "$artifact\AUREON_PRIME_MT5_V3_00_DUAL_ASSET.mq5"
-          Copy-Item $ex5 "$artifact\AUREON_PRIME_MT5_V3_00_DUAL_ASSET.ex5"
+          Copy-Item $env:EA_SOURCE "$artifact\AUREON_PRIME_MT5_V4_MULTI_ASSET.mq5"
+          Copy-Item $ex5 "$artifact\AUREON_PRIME_MT5_V4_MULTI_ASSET.ex5"
           (Get-FileHash $env:EA_SOURCE -Algorithm SHA256).Hash | Set-Content "$artifact\source.sha256"
           (Get-FileHash $ex5 -Algorithm SHA256).Hash | Set-Content "$artifact\ex5.sha256"
           'AUREON_PRIME_MT5_COMPILE_PASSED' | Set-Content "$artifact\status.txt"
@@ -128,7 +128,7 @@ jobs:
       - name: Upload compiled EA
         uses: actions/upload-artifact@v4
         with:
-          name: AUREON_PRIME_MT5_V3
+          name: AUREON_PRIME_MT5_V4
           path: mt5_compile_artifact
           retention-days: 14
           if-no-files-found: error

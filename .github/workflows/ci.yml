@@ -22,6 +22,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate deployment shell
+        shell: bash
+        run: |
+          bash -n deploy/bootstrap-ubuntu-mt5.sh
+
       - name: Set up .NET 8
         uses: actions/setup-dotnet@v4
         with:
