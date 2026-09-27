@@ -16,7 +16,7 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
 
     steps:
       - name: Checkout
@@ -33,17 +33,25 @@ jobs:
       - name: Run safety tests
         run: dotnet run --project tests/Aureon.Core.SmokeTests/Aureon.Core.SmokeTests.csproj -c Release --no-restore
 
-      - name: Restore cTrader cBot
-        run: dotnet restore src/Aureon.Prime/Aureon.Prime.csproj
+      - name: Pull official cTrader CLI image
+        run: docker pull ghcr.io/spotware/ctrader-console:latest
 
-      - name: Build AUREON PRIME
-        run: dotnet build src/Aureon.Prime/Aureon.Prime.csproj -c Release --no-restore -p:AlgoPublish=false
+      - name: Show cTrader CLI version
+        run: docker run --rm ghcr.io/spotware/ctrader-console:latest --version
+
+      - name: Build AUREON PRIME with cTrader CLI
+        run: |
+          docker run --rm \
+            -v "$PWD:/workspace" \
+            -w /workspace \
+            ghcr.io/spotware/ctrader-console:latest \
+            build src/Aureon.Prime/Aureon.Prime.csproj
 
       - name: Locate .algo package
         id: algo
         shell: bash
         run: |
-          FILE="$(find src/Aureon.Prime/bin/Release -type f -name '*.algo' -print -quit)"
+          FILE="$(find src/Aureon.Prime -type f -name '*.algo' -print -quit)"
           test -n "$FILE"
           echo "file=$FILE" >> "$GITHUB_OUTPUT"
           echo "Built $FILE"
