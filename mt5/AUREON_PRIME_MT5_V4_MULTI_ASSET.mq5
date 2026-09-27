@@ -4,7 +4,7 @@
 //| Timer-driven dual-symbol execution and shared portfolio governor.  |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "4.10"
+#property version   "4.11"
 #property description "AUREON PRIME V4.10: single-terminal Gold/Bitcoin demo-forward engine with PrimeXBT-safe BTCUSDT risk fallback, server OrderCheck preflight, shared portfolio risk, MTF FVG intelligence and adaptive management."
 
 #include <Trade/Trade.mqh>
@@ -1327,6 +1327,44 @@ void UpdateSpreadState(AssetState &a)
    a.lastSpreadTickMsc=tick.time_msc;
 }
 
+bool TesterBitcoinMarginPreflight(AssetState &a,double volume,double entry,
+                                   double equity,double currentMargin,double freeMargin)
+{
+   if(!MQLInfoInteger(MQL_TESTER) || a.kind!=AUREON_KIND_BITCOIN)
+      return false;
+
+   long leverage=AccountInfoInteger(ACCOUNT_LEVERAGE);
+   double contract=SymbolInfoDouble(a.symbol,SYMBOL_TRADE_CONTRACT_SIZE);
+   if(leverage<=0 || contract<=0.0 || entry<=0.0 || volume<=0.0)
+      return false;
+
+   // Strategy Tester only. PrimeXBT's BTCUSDT catalogue reports zero through
+   // client-side margin calculators because profit currency is UST. Estimate
+   // notional/leverage solely so historical research can proceed. Live/demo
+   // forward execution never uses this path and still requires OrderCheck().
+   double required=(entry*contract*volume)/(double)leverage;
+   if(required<=0.0 || required>freeMargin)
+      return false;
+
+   if(InpMaxSingleTradeMarginPct>0.0 &&
+      required/equity*100.0>InpMaxSingleTradeMarginPct)
+      return false;
+
+   double projected=currentMargin+required;
+   if(projected>0.0 && InpMinProjectedMarginLevelPct>0.0)
+   {
+      double level=equity/projected*100.0;
+      if(level<InpMinProjectedMarginLevelPct)
+         return false;
+   }
+
+   if(InpVerboseLog)
+      Print("AUREON V4.11 BTC TESTER margin estimate | required=",
+            DoubleToString(required,2)," volume=",DoubleToString(volume,4));
+
+   return true;
+}
+
 bool MarginPreflight(AssetState &a,bool bullish,double volume,double entry)
 {
    ENUM_ORDER_TYPE type=bullish?ORDER_TYPE_BUY:ORDER_TYPE_SELL;
@@ -1338,9 +1376,8 @@ bool MarginPreflight(AssetState &a,bool bullish,double volume,double entry)
       return false;
 
    // First ask MT5/broker to validate the exact market request. OrderCheck()
-   // does not send the order. For PrimeXBT BTCUSDT this is mandatory because
-   // the catalogue's client-side OrderCalcMargin metadata currently resolves
-   // to zero.
+   // does not send the order. Live/demo-forward BTC always fails closed if
+   // server validation is unavailable.
    MqlTradeRequest request={};
    MqlTradeCheckResult check={};
    request.action=TRADE_ACTION_DEAL;
@@ -1361,6 +1398,16 @@ bool MarginPreflight(AssetState &a,bool bullish,double volume,double entry)
       if(check.margin_free<=0.0)
          return false;
 
+      if(a.kind==AUREON_KIND_BITCOIN && incremental<=0.0)
+      {
+         if(TesterBitcoinMarginPreflight(a,volume,entry,equity,currentMargin,freeMargin))
+            return true;
+
+         if(InpVerboseLog)
+            Print("AUREON V4.11 BTC OrderCheck returned zero incremental margin; entry rejected.");
+         return false;
+      }
+
       if(InpMaxSingleTradeMarginPct>0.0 &&
          incremental/equity*100.0>InpMaxSingleTradeMarginPct)
          return false;
@@ -1370,22 +1417,21 @@ bool MarginPreflight(AssetState &a,bool bullish,double volume,double entry)
          check.margin_level<InpMinProjectedMarginLevelPct)
          return false;
 
-      if(a.kind==AUREON_KIND_BITCOIN && incremental<=0.0)
-      {
-         if(InpVerboseLog)
-            Print("AUREON V4.10 BTC OrderCheck returned zero incremental margin; entry rejected.");
-         return false;
-      }
-
       return true;
    }
 
-   if(a.kind==AUREON_KIND_BITCOIN && InpRequireBitcoinServerOrderCheck)
+   if(a.kind==AUREON_KIND_BITCOIN)
    {
-      if(InpVerboseLog)
-         Print("AUREON V4.10 BTC OrderCheck rejected/preflight unavailable | retcode=",
-               check.retcode," comment=",check.comment," err=",GetLastError());
-      return false;
+      if(TesterBitcoinMarginPreflight(a,volume,entry,equity,currentMargin,freeMargin))
+         return true;
+
+      if(InpRequireBitcoinServerOrderCheck)
+      {
+         if(InpVerboseLog)
+            Print("AUREON V4.11 BTC OrderCheck rejected/preflight unavailable | retcode=",
+                  check.retcode," comment=",check.comment," err=",GetLastError());
+         return false;
+      }
    }
 
    // Gold and non-BTC fallback: retain client-side margin calculation.
