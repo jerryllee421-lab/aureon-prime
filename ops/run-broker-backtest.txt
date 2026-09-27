@@ -1,3 +1,4 @@
+triggered_at=2026-09-27T13:27:00+02:00
 purpose=PrimeXBT native 30-day AUREON V4.10 multi-asset Strategy Tester
 mode=1-minute OHLC
 credentials=investor read-only
