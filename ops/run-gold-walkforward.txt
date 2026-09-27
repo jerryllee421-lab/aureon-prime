@@ -1,0 +1,5 @@
+purpose=Gold M5 long-only 360-day segmented validation
+segments=3x120 days
+model=1-minute OHLC
+credentials=investor read-only
+broker_orders=none
