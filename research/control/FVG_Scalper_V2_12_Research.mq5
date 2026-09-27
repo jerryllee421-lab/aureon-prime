@@ -997,3 +997,63 @@ void LoadZoneState()
    g_zone.formed=GlobalVariableCheck(p+"Z_FORMED")?(datetime)GlobalVariableGet(p+"Z_FORMED"):0;
    g_zone.traded=GlobalVariableCheck(p+"Z_TRADED") && GlobalVariableGet(p+"Z_TRADED")>0.5;
    g_zone.shift=(g_zone.formed>0)?iBarShift(_Symbol,InpEntryTF,g_zone.formed,false):-1;
+   if(g_zone.valid && FVGExpired(g_zone))
+      g_zone.valid=false;
+}
+
+//+------------------------------------------------------------------+
+//| Position helpers                                                  |
+//+------------------------------------------------------------------+
+bool HasOurPosition()
+{
+   for(int i=PositionsTotal()-1;i>=0;i--)
+   {
+      ulong t=PositionGetTicket(i);
+      if(t==0 || !PositionSelectByTicket(t)) continue;
+      if(PositionGetString(POSITION_SYMBOL)==_Symbol &&
+         (ulong)PositionGetInteger(POSITION_MAGIC)==InpMagic) return true;
+   }
+   return false;
+}
+
+ulong GetOurPositionTicket()
+{
+   for(int i=PositionsTotal()-1;i>=0;i--)
+   {
+      ulong t=PositionGetTicket(i);
+      if(t==0 || !PositionSelectByTicket(t)) continue;
+      if(PositionGetString(POSITION_SYMBOL)==_Symbol &&
+         (ulong)PositionGetInteger(POSITION_MAGIC)==InpMagic) return t;
+   }
+   return 0;
+}
+
+double GetATR()
+{
+   double v[2]; ArraySetAsSeries(v,true);
+   if(CopyBuffer(hATR,0,0,2,v)<2) return 0;
+   return v[1];
+}
+
+bool IsNewBar()
+{
+   datetime t=iTime(_Symbol,InpEntryTF,0);
+   if(t==0) return false;
+   if(t!=g_lastBar){g_lastBar=t;return true;}
+   return false;
+}
+
+double NormalizePrice(double price)
+{
+   return NormalizeDouble(price,(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS));
+}
+
+double NormalizeVolume(double volume)
+{
+   double step=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_STEP);
+   if(step<=0) return 0;
+   int digits=0; double x=step;
+   while(x<1.0 && digits<8){x*=10.0;digits++;}
+   return NormalizeDouble(volume,digits);
+}
+//+------------------------------------------------------------------+
