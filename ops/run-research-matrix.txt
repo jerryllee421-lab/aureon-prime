@@ -1,0 +1,5 @@
+purpose=AUREON controlled research matrix
+window=30 days
+scenarios=gold baseline; gold strict M5; BTC baseline
+credentials=investor read-only
+broker_orders=none
