@@ -4,7 +4,7 @@
 //| Timer-driven dual-symbol execution and shared portfolio governor.  |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "4.11"
+#property version   "4.20"
 #property description "AUREON PRIME V4.10: single-terminal Gold/Bitcoin demo-forward engine with PrimeXBT-safe BTCUSDT risk fallback, server OrderCheck preflight, shared portfolio risk, MTF FVG intelligence and adaptive management."
 
 #include <Trade/Trade.mqh>
@@ -116,6 +116,15 @@ input int InpGoldMaxAttemptsPerFVG = 2;
 input int InpGoldMaxTradesDay = 12;
 input double InpGoldRewardRisk = 30.0;
 input int InpGoldMaxSpreadPoints = 80;
+
+input group "Gold Liquidity / MSS Gate"
+input bool InpUseGoldLiquidityMSS = false;
+input int InpGoldLiquidityLookbackBars = 20;
+input int InpGoldSweepMaxAgeBars = 12;
+input double InpGoldMinSweepATR = 0.05;
+input double InpGoldMaxSweepATR = 0.75;
+input int InpGoldMSSLookbackBars = 5;
+input double InpGoldSweepReclaimCloseRatio = 0.55;
 
 //--------------------------- Bitcoin profile --------------------------
 input group "Bitcoin Profile"
@@ -453,6 +462,7 @@ void ProcessAsset(AssetState &a)
 
    a.qualityScore=ComputeEntryQualityScore(a,a.zone.bullish);
    if(!DirectionalQualityAllows(a,a.zone.bullish)) return;
+   if(!GoldLiquidityMSSAllows(a,a.zone.bullish)) return;
    if(!ReentryAllows(a,a.zone.bullish)) return;
 
    TryFVGEntry(a);
@@ -819,6 +829,119 @@ bool DirectionalQualityAllows(AssetState &a,bool bullish)
       return false;
 
    return true;
+}
+
+//+------------------------------------------------------------------+
+//| Gold liquidity sweep -> reclaim -> MSS structural gate            |
+//+------------------------------------------------------------------+
+bool GoldLiquidityMSSAllows(AssetState &a,bool bullish)
+{
+   if(!InpUseGoldLiquidityMSS || a.kind!=AUREON_KIND_GOLD)
+      return true;
+
+   if(!a.zone.valid || a.zone.formed<=0)
+      return false;
+
+   int zoneShift=iBarShift(a.symbol,a.entryTF,a.zone.formed,false);
+   if(zoneShift<1)
+      return false;
+
+   int need=zoneShift+InpGoldSweepMaxAgeBars+InpGoldLiquidityLookbackBars+
+            InpGoldMSSLookbackBars+8;
+   if(need<50) need=50;
+
+   MqlRates r[];
+   double atr[];
+   ArraySetAsSeries(r,true);
+   ArraySetAsSeries(atr,true);
+
+   if(CopyRates(a.symbol,a.entryTF,0,need,r)<need)
+      return false;
+   if(CopyBuffer(a.hATR,0,0,need,atr)<need)
+      return false;
+
+   int lastSweep=zoneShift+InpGoldSweepMaxAgeBars;
+   if(lastSweep+InpGoldLiquidityLookbackBars+2>=ArraySize(r))
+      lastSweep=ArraySize(r)-InpGoldLiquidityLookbackBars-3;
+
+   for(int s=zoneShift+1; s<=lastSweep; s++)
+   {
+      if(s+InpGoldLiquidityLookbackBars>=ArraySize(r))
+         break;
+
+      double av=atr[s];
+      double range=r[s].high-r[s].low;
+      if(av<=0.0 || range<=0.0)
+         continue;
+
+      if(bullish)
+      {
+         double priorLow=r[s+1].low;
+         double structureHigh=r[s+1].high;
+
+         for(int k=2;k<=InpGoldLiquidityLookbackBars;k++)
+            priorLow=MathMin(priorLow,r[s+k].low);
+
+         for(int k=2;k<=InpGoldMSSLookbackBars;k++)
+            structureHigh=MathMax(structureHigh,r[s+k].high);
+
+         double sweepDepth=priorLow-r[s].low;
+         double closePos=(r[s].close-r[s].low)/range;
+
+         if(sweepDepth<av*InpGoldMinSweepATR || sweepDepth>av*InpGoldMaxSweepATR)
+            continue;
+         if(r[s].close<=priorLow || closePos<InpGoldSweepReclaimCloseRatio)
+            continue;
+
+         // MSS must occur after the sweep and no later than the FVG formation.
+         for(int j=s-1; j>=zoneShift; j--)
+         {
+            if(r[j].close>structureHigh && r[j].close>r[j].open)
+            {
+               if(InpVerboseLog)
+                  Print("AUREON V4.20 GOLD structure confirmed | sweep=",
+                        TimeToString(r[s].time,TIME_DATE|TIME_MINUTES),
+                        " mss=",TimeToString(r[j].time,TIME_DATE|TIME_MINUTES),
+                        " zone=",TimeToString(a.zone.formed,TIME_DATE|TIME_MINUTES));
+               return true;
+            }
+         }
+      }
+      else
+      {
+         double priorHigh=r[s+1].high;
+         double structureLow=r[s+1].low;
+
+         for(int k=2;k<=InpGoldLiquidityLookbackBars;k++)
+            priorHigh=MathMax(priorHigh,r[s+k].high);
+
+         for(int k=2;k<=InpGoldMSSLookbackBars;k++)
+            structureLow=MathMin(structureLow,r[s+k].low);
+
+         double sweepDepth=r[s].high-priorHigh;
+         double closePos=(r[s].close-r[s].low)/range;
+
+         if(sweepDepth<av*InpGoldMinSweepATR || sweepDepth>av*InpGoldMaxSweepATR)
+            continue;
+         if(r[s].close>=priorHigh || closePos>(1.0-InpGoldSweepReclaimCloseRatio))
+            continue;
+
+         for(int j=s-1; j>=zoneShift; j--)
+         {
+            if(r[j].close<structureLow && r[j].close<r[j].open)
+            {
+               if(InpVerboseLog)
+                  Print("AUREON V4.20 GOLD structure confirmed | bearish sweep=",
+                        TimeToString(r[s].time,TIME_DATE|TIME_MINUTES),
+                        " mss=",TimeToString(r[j].time,TIME_DATE|TIME_MINUTES),
+                        " zone=",TimeToString(a.zone.formed,TIME_DATE|TIME_MINUTES));
+               return true;
+            }
+         }
+      }
+   }
+
+   return false;
 }
 
 //+------------------------------------------------------------------+
@@ -1892,6 +2015,12 @@ bool ValidateInputs()
       return false;
 
    if(InpGoldRiskPct<=0.0 || InpBitcoinRiskPct<=0.0)
+      return false;
+
+   if(InpGoldLiquidityLookbackBars<3 || InpGoldSweepMaxAgeBars<1 ||
+      InpGoldMSSLookbackBars<2 || InpGoldMSSLookbackBars>InpGoldLiquidityLookbackBars ||
+      InpGoldMinSweepATR<0.0 || InpGoldMaxSweepATR<=InpGoldMinSweepATR ||
+      InpGoldSweepReclaimCloseRatio<=0.5 || InpGoldSweepReclaimCloseRatio>=1.0)
       return false;
 
    if(InpBitcoinUSTUSDConversion<=0.0 ||
