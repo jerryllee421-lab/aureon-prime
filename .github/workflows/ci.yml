@@ -1,0 +1,57 @@
+name: AUREON PRIME CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aureon-prime-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore safety tests
+        run: dotnet restore tests/Aureon.Core.SmokeTests/Aureon.Core.SmokeTests.csproj
+
+      - name: Run safety tests
+        run: dotnet run --project tests/Aureon.Core.SmokeTests/Aureon.Core.SmokeTests.csproj -c Release --no-restore
+
+      - name: Show cTrader CLI version
+        run: |
+          docker pull ghcr.io/spotware/ctrader-console:latest
+          docker run --rm ghcr.io/spotware/ctrader-console:latest --version
+
+      - name: Build AUREON PRIME with cTrader CLI
+        id: algo
+        shell: bash
+        run: |
+          chmod +x scripts/build-cbot.sh
+          scripts/build-cbot.sh
+          test -f artifacts/AUREON_PRIME.algo
+          echo "file=artifacts/AUREON_PRIME.algo" >> "$GITHUB_OUTPUT"
+
+      - name: Upload validated package
+        if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: AUREON_PRIME
+          path: ${{ steps.algo.outputs.file }}
+          if-no-files-found: error
+          retention-days: 7

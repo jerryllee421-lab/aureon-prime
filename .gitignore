@@ -1,0 +1,15 @@
+bin/
+obj/
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.cache
+*.log
+TestResults/
+artifacts/
+*.cbotset
+.env
+.env.*
+!.env.example

@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Deterministic>true</Deterministic>
+    <AlgoName>AUREON_PRIME</AlgoName>
+    <AlgoPublish>false</AlgoPublish>
+    <IncludeSource>true</IncludeSource>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="cTrader.Automate" Version="1.0.21" />
+    <PackageReference Include="cTrader.Automate.SourceGenerators" Version="1.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../Aureon.Core/**/*.cs" LinkBase="Core" />
+  </ItemGroup>
+</Project>
