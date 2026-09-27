@@ -297,15 +297,18 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    if(entryType!=DEAL_ENTRY_OUT && entryType!=DEAL_ENTRY_OUT_BY)
       return;
 
-   AssetState &a=g_assets[idx];
-
    double net=HistoryDealGetDouble(trans.deal,DEAL_PROFIT)
              +HistoryDealGetDouble(trans.deal,DEAL_COMMISSION)
              +HistoryDealGetDouble(trans.deal,DEAL_SWAP)
              +HistoryDealGetDouble(trans.deal,DEAL_FEE);
 
+   RegisterExit(g_assets[idx],trans.deal,net);
+}
+
+void RegisterExit(AssetState &a,ulong deal,double net)
+{
    double realizedR=(a.zone.lastRiskMoney>0.0)?net/a.zone.lastRiskMoney:0.0;
-   a.zone.lastExitTime=(datetime)HistoryDealGetInteger(trans.deal,DEAL_TIME);
+   a.zone.lastExitTime=(datetime)HistoryDealGetInteger(deal,DEAL_TIME);
    a.zone.lastRealizedR=realizedR;
 
    if(realizedR<=-InpQuarantineLossR || a.zone.attempts>=MaxAttempts(a))
