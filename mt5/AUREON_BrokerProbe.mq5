@@ -1,0 +1,104 @@
+//+------------------------------------------------------------------+
+//| AUREON_BrokerProbe.mq5                                            |
+//| Read-only broker/symbol capability probe for MT5 demo validation  |
+//+------------------------------------------------------------------+
+#property strict
+#property script_show_inputs
+#property version "1.00"
+
+input string InpOutputFile = "AUREON_BROKER_PROBE.csv";
+
+bool RelevantSymbol(string symbol)
+{
+   string s=symbol;
+   StringToUpper(s);
+   return StringFind(s,"XAU")>=0 || StringFind(s,"GOLD")>=0 || StringFind(s,"BTC")>=0;
+}
+
+string SessionSummary(string symbol,ENUM_DAY_OF_WEEK day)
+{
+   string out="";
+   datetime from=0,to=0;
+   for(uint i=0;i<16;i++)
+   {
+      if(!SymbolInfoSessionTrade(symbol,day,i,from,to))
+         break;
+
+      if(StringLen(out)>0) out+=";";
+      out+=TimeToString(from,TIME_MINUTES)+"-"+TimeToString(to,TIME_MINUTES);
+   }
+   return out;
+}
+
+void OnStart()
+{
+   int h=FileOpen(InpOutputFile,FILE_WRITE|FILE_CSV|FILE_ANSI|FILE_SHARE_READ,',');
+   if(h==INVALID_HANDLE)
+   {
+      Print("AUREON BrokerProbe FileOpen failed: ",GetLastError());
+      return;
+   }
+
+   FileWrite(h,
+      "account_trade_mode","account_currency","server",
+      "symbol","digits","point","tick_size","tick_value",
+      "contract_size","volume_min","volume_step","volume_max",
+      "stops_level","freeze_level","trade_mode","spread_float","spread_points",
+      "swap_long","swap_short","bid","ask","quote_time",
+      "sun_sessions","mon_sessions","tue_sessions","wed_sessions",
+      "thu_sessions","fri_sessions","sat_sessions");
+
+   string server=AccountInfoString(ACCOUNT_SERVER);
+   string currency=AccountInfoString(ACCOUNT_CURRENCY);
+   long accountMode=AccountInfoInteger(ACCOUNT_TRADE_MODE);
+
+   int total=SymbolsTotal(false);
+   int matches=0;
+
+   for(int i=0;i<total;i++)
+   {
+      string sym=SymbolName(i,false);
+      if(!RelevantSymbol(sym))
+         continue;
+
+      SymbolSelect(sym,true);
+      MqlTick tick;
+      ZeroMemory(tick);
+      SymbolInfoTick(sym,tick);
+
+      FileWrite(h,
+         accountMode,currency,server,
+         sym,
+         (int)SymbolInfoInteger(sym,SYMBOL_DIGITS),
+         DoubleToString(SymbolInfoDouble(sym,SYMBOL_POINT),10),
+         DoubleToString(SymbolInfoDouble(sym,SYMBOL_TRADE_TICK_SIZE),10),
+         DoubleToString(SymbolInfoDouble(sym,SYMBOL_TRADE_TICK_VALUE),10),
+         DoubleToString(SymbolInfoDouble(sym,SYMBOL_TRADE_CONTRACT_SIZE),4),
+         DoubleToString(SymbolInfoDouble(sym,SYMBOL_VOLUME_MIN),4),
+         DoubleToString(SymbolInfoDouble(sym,SYMBOL_VOLUME_STEP),4),
+         DoubleToString(SymbolInfoDouble(sym,SYMBOL_VOLUME_MAX),4),
+         (long)SymbolInfoInteger(sym,SYMBOL_TRADE_STOPS_LEVEL),
+         (long)SymbolInfoInteger(sym,SYMBOL_TRADE_FREEZE_LEVEL),
+         (long)SymbolInfoInteger(sym,SYMBOL_TRADE_MODE),
+         (long)SymbolInfoInteger(sym,SYMBOL_SPREAD_FLOAT),
+         (long)SymbolInfoInteger(sym,SYMBOL_SPREAD),
+         DoubleToString(SymbolInfoDouble(sym,SYMBOL_SWAP_LONG),6),
+         DoubleToString(SymbolInfoDouble(sym,SYMBOL_SWAP_SHORT),6),
+         DoubleToString(tick.bid,(int)SymbolInfoInteger(sym,SYMBOL_DIGITS)),
+         DoubleToString(tick.ask,(int)SymbolInfoInteger(sym,SYMBOL_DIGITS)),
+         TimeToString((datetime)tick.time,TIME_DATE|TIME_SECONDS),
+         SessionSummary(sym,SUNDAY),
+         SessionSummary(sym,MONDAY),
+         SessionSummary(sym,TUESDAY),
+         SessionSummary(sym,WEDNESDAY),
+         SessionSummary(sym,THURSDAY),
+         SessionSummary(sym,FRIDAY),
+         SessionSummary(sym,SATURDAY));
+
+      matches++;
+   }
+
+   FileClose(h);
+   Print("AUREON BrokerProbe complete. Relevant symbols=",matches," file=",InpOutputFile);
+}
+//+------------------------------------------------------------------+
