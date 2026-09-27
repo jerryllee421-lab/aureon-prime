@@ -39,6 +39,18 @@ jobs:
       - name: Show cTrader CLI version
         run: docker run --rm ghcr.io/spotware/ctrader-console:latest --version
 
+      - name: Inspect official cTrader C# scaffold
+        run: |
+          rm -rf /tmp/ctrader-probe
+          mkdir -p /tmp/ctrader-probe
+          docker run --rm \
+            -v "/tmp/ctrader-probe:/workspace" \
+            -w /workspace \
+            ghcr.io/spotware/ctrader-console:latest \
+            create cbot ProbeBot
+          find /tmp/ctrader-probe -maxdepth 3 -type f -print
+          find /tmp/ctrader-probe -type f -name '*.csproj' -exec sh -c 'echo "=== $1 ==="; cat "$1"' _ {} \;
+
       - name: Build AUREON PRIME with cTrader CLI
         run: |
           docker run --rm \
