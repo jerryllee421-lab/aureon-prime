@@ -125,42 +125,43 @@ jobs:
             Write-SetFile -Path $setPath -Lines $SetLines
 
             $cfg=Join-Path $env:RUNNER_TEMP "$Name.ini"
-            @"
-            [Common]
-            Login=$($env:MT5_LOGIN)
-            Password=$($env:MT5_PASSWORD)
-            Server=$($env:MT5_SERVER)
-            KeepPrivate=0
-            NewsEnable=0
-            CertInstall=0
-
-            [Experts]
-            AllowLiveTrading=0
-            AllowDllImport=0
-            Enabled=1
-            Account=0
-            Profile=0
-
-            [Tester]
-            Expert=AUREON\AUREON_PRIME_MT5_V4_MULTI_ASSET
-            ExpertParameters=$setName
-            Symbol=$PrimarySymbol
-            Period=$Period
-            Deposit=10000
-            Currency=USD
-            Leverage=100
-            Model=1
-            ExecutionMode=0
-            Optimization=0
-            ForwardMode=0
-            UseCloud=0
-            Visual=0
-            FromDate=$($from.ToString('yyyy.MM.dd'))
-            ToDate=$($to.ToString('yyyy.MM.dd'))
-            Report=reports\$Name
-            ReplaceReport=1
-            ShutdownTerminal=1
-            "@ | Set-Content -Path $cfg -Encoding Unicode
+            $cfgLines=@(
+              '[Common]',
+              "Login=$($env:MT5_LOGIN)",
+              "Password=$($env:MT5_PASSWORD)",
+              "Server=$($env:MT5_SERVER)",
+              'KeepPrivate=0',
+              'NewsEnable=0',
+              'CertInstall=0',
+              '',
+              '[Experts]',
+              'AllowLiveTrading=0',
+              'AllowDllImport=0',
+              'Enabled=1',
+              'Account=0',
+              'Profile=0',
+              '',
+              '[Tester]',
+              'Expert=AUREON\AUREON_PRIME_MT5_V4_MULTI_ASSET',
+              "ExpertParameters=$setName",
+              "Symbol=$PrimarySymbol",
+              "Period=$Period",
+              'Deposit=10000',
+              'Currency=USD',
+              'Leverage=100',
+              'Model=1',
+              'ExecutionMode=0',
+              'Optimization=0',
+              'ForwardMode=0',
+              'UseCloud=0',
+              'Visual=0',
+              "FromDate=$($from.ToString('yyyy.MM.dd'))",
+              "ToDate=$($to.ToString('yyyy.MM.dd'))",
+              "Report=reports\$Name",
+              'ReplaceReport=1',
+              'ShutdownTerminal=1'
+            )
+            $cfgLines | Set-Content -Path $cfg -Encoding Unicode
 
             $terminal=Join-Path $root 'terminal64.exe'
             $p=Start-Process -FilePath $terminal -ArgumentList @('/portable',"/config:$cfg") -PassThru
