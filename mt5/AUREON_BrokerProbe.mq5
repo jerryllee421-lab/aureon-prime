@@ -4,7 +4,7 @@
 //+------------------------------------------------------------------+
 #property strict
 #property script_show_inputs
-#property version "1.10"
+#property version "1.20"
 
 input string InpOutputFile = "AUREON_BROKER_PROBE.csv";
 
@@ -65,6 +65,7 @@ void OnStart()
       "account_trade_mode","account_currency","account_leverage","server",
       "symbol","synchronized","digits","point","tick_size","tick_value",
       "contract_size","volume_min","volume_step","volume_max",
+      "calc_profit_currency","calc_mode","calc_1tick_buy_profit","calc_1tick_sell_profit","calc_margin_buy_1lot",
       "stops_level","freeze_level","trade_mode","spread_float","spread_points",
       "swap_long","swap_short","bid","ask","quote_time",
       "sun_sessions","mon_sessions","tue_sessions","wed_sessions",
@@ -89,6 +90,18 @@ void OnStart()
       ZeroMemory(tick);
       SymbolInfoTick(sym,tick);
 
+      double tickSize=SymbolInfoDouble(sym,SYMBOL_TRADE_TICK_SIZE);
+      double buyTickProfit=0.0;
+      double sellTickProfit=0.0;
+      double buyMargin=0.0;
+
+      if(tick.ask>0.0 && tickSize>0.0)
+         OrderCalcProfit(ORDER_TYPE_BUY,sym,1.0,tick.ask,tick.ask+tickSize,buyTickProfit);
+      if(tick.bid>0.0 && tickSize>0.0)
+         OrderCalcProfit(ORDER_TYPE_SELL,sym,1.0,tick.bid,tick.bid-tickSize,sellTickProfit);
+      if(tick.ask>0.0)
+         OrderCalcMargin(ORDER_TYPE_BUY,sym,1.0,tick.ask,buyMargin);
+
       FileWrite(h,
          accountMode,currency,leverage,server,
          sym,(synchronized?"TRUE":"FALSE"),
@@ -100,6 +113,11 @@ void OnStart()
          DoubleToString(SymbolInfoDouble(sym,SYMBOL_VOLUME_MIN),4),
          DoubleToString(SymbolInfoDouble(sym,SYMBOL_VOLUME_STEP),4),
          DoubleToString(SymbolInfoDouble(sym,SYMBOL_VOLUME_MAX),4),
+         SymbolInfoString(sym,SYMBOL_CURRENCY_PROFIT),
+         (long)SymbolInfoInteger(sym,SYMBOL_TRADE_CALC_MODE),
+         DoubleToString(buyTickProfit,10),
+         DoubleToString(sellTickProfit,10),
+         DoubleToString(buyMargin,6),
          (long)SymbolInfoInteger(sym,SYMBOL_TRADE_STOPS_LEVEL),
          (long)SymbolInfoInteger(sym,SYMBOL_TRADE_FREEZE_LEVEL),
          (long)SymbolInfoInteger(sym,SYMBOL_TRADE_MODE),
