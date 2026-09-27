@@ -4,9 +4,31 @@
 //+------------------------------------------------------------------+
 #property strict
 #property script_show_inputs
-#property version "1.00"
+#property version "1.10"
 
 input string InpOutputFile = "AUREON_BROKER_PROBE.csv";
+
+bool WaitForSymbolData(string symbol,int timeoutMs)
+{
+   if(!SymbolSelect(symbol,true))
+      return false;
+
+   int waited=0;
+   while(waited<timeoutMs)
+   {
+      MqlTick tick;
+      ZeroMemory(tick);
+      bool synced=SymbolIsSynchronized(symbol);
+      bool haveTick=SymbolInfoTick(symbol,tick) && tick.time_msc>0;
+      if(synced && haveTick)
+         return true;
+
+      Sleep(100);
+      waited+=100;
+   }
+
+   return SymbolIsSynchronized(symbol);
+}
 
 bool RelevantSymbol(string symbol)
 {
@@ -40,8 +62,8 @@ void OnStart()
    }
 
    FileWrite(h,
-      "account_trade_mode","account_currency","server",
-      "symbol","digits","point","tick_size","tick_value",
+      "account_trade_mode","account_currency","account_leverage","server",
+      "symbol","synchronized","digits","point","tick_size","tick_value",
       "contract_size","volume_min","volume_step","volume_max",
       "stops_level","freeze_level","trade_mode","spread_float","spread_points",
       "swap_long","swap_short","bid","ask","quote_time",
@@ -51,6 +73,7 @@ void OnStart()
    string server=AccountInfoString(ACCOUNT_SERVER);
    string currency=AccountInfoString(ACCOUNT_CURRENCY);
    long accountMode=AccountInfoInteger(ACCOUNT_TRADE_MODE);
+   long leverage=AccountInfoInteger(ACCOUNT_LEVERAGE);
 
    int total=SymbolsTotal(false);
    int matches=0;
@@ -61,14 +84,14 @@ void OnStart()
       if(!RelevantSymbol(sym))
          continue;
 
-      SymbolSelect(sym,true);
+      bool synchronized=WaitForSymbolData(sym,2500);
       MqlTick tick;
       ZeroMemory(tick);
       SymbolInfoTick(sym,tick);
 
       FileWrite(h,
-         accountMode,currency,server,
-         sym,
+         accountMode,currency,leverage,server,
+         sym,(synchronized?"TRUE":"FALSE"),
          (int)SymbolInfoInteger(sym,SYMBOL_DIGITS),
          DoubleToString(SymbolInfoDouble(sym,SYMBOL_POINT),10),
          DoubleToString(SymbolInfoDouble(sym,SYMBOL_TRADE_TICK_SIZE),10),
