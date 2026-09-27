@@ -1,0 +1,190 @@
+name: AUREON V2.12 Control Reproduction
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'research/control/**'
+      - 'scripts/parse_mt5_report.py'
+      - '.github/workflows/v212-control-reproduction.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'ops/run-v212-control.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aureon-v212-control-reproduction
+  cancel-in-progress: true
+
+env:
+  MT5_INSTALLER_URL: https://download.terminal.free/cdn/web/pxbt.trading.ltd/mt5/pxbttrading5setup.exe
+  EA_SOURCE: research/control/FVG_Scalper_V2_12_Research.mq5
+
+jobs:
+  reproduce:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Require read-only PrimeXBT demo credentials
+        shell: pwsh
+        env:
+          MT5_LOGIN: ${{ secrets.MT5_DEMO_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_DEMO_INVESTOR_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_DEMO_SERVER }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if([string]::IsNullOrWhiteSpace($env:MT5_LOGIN)){ throw 'Missing MT5_DEMO_LOGIN' }
+          if([string]::IsNullOrWhiteSpace($env:MT5_PASSWORD)){ throw 'Missing MT5_DEMO_INVESTOR_PASSWORD' }
+          if([string]::IsNullOrWhiteSpace($env:MT5_SERVER)){ throw 'Missing MT5_DEMO_SERVER' }
+
+      - name: Install PrimeXBT MT5
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root='C:\AUREON_MT5'
+          $installer=Join-Path $env:RUNNER_TEMP 'pxbttrading5setup.exe'
+          Invoke-WebRequest -Uri $env:MT5_INSTALLER_URL -OutFile $installer
+          if((Get-Item $installer).Length -lt 100000){ throw 'Installer unexpectedly small' }
+          $p=Start-Process -FilePath $installer -ArgumentList @('/auto',"/path:$root") -PassThru
+          if(-not $p.WaitForExit(600000)){ $p.Kill(); throw 'MT5 install timed out' }
+          $deadline=(Get-Date).AddMinutes(3)
+          while((Get-Date)-lt $deadline -and -not (Test-Path "$root\metaeditor64.exe")){ Start-Sleep 2 }
+          if(-not (Test-Path "$root\metaeditor64.exe")){ throw 'MetaEditor missing' }
+          "MT5_ROOT=$root" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          & "$root\terminal64.exe" /portable
+          Start-Sleep 8
+          Get-Process terminal64 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+      - name: Compile frozen V2.12 source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=$env:MT5_ROOT
+          $mql5=Join-Path $root 'MQL5'
+          $destDir=Join-Path $mql5 'Experts\AUREON'
+          New-Item -ItemType Directory -Force -Path $destDir | Out-Null
+          $dest=Join-Path $destDir 'FVG_Scalper_V2_12_Research.mq5'
+          Copy-Item $env:EA_SOURCE $dest -Force
+          $meta=Join-Path $root 'metaeditor64.exe'
+          $p=Start-Process -FilePath $meta -ArgumentList @("/compile:$dest","/include:$mql5",'/log') -PassThru
+          if(-not $p.WaitForExit(180000)){ $p.Kill(); throw 'Compile timed out' }
+          Start-Sleep 2
+          $ex5=[IO.Path]::ChangeExtension($dest,'.ex5')
+          $log=[IO.Path]::ChangeExtension($dest,'.log')
+          if(-not (Test-Path $ex5)){ throw 'No EX5 produced' }
+          $txt=[Text.Encoding]::Unicode.GetString([IO.File]::ReadAllBytes($log))
+          Write-Host $txt
+          if($txt -notmatch '0 errors'){ throw 'V2.12 compile failed' }
+
+      - name: Synchronize broker history
+        shell: pwsh
+        env:
+          MT5_LOGIN: ${{ secrets.MT5_DEMO_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_DEMO_INVESTOR_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_DEMO_SERVER }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=$env:MT5_ROOT
+          $cfg=Join-Path $env:RUNNER_TEMP 'sync.ini'
+          @(
+            '[Common]',
+            "Login=$($env:MT5_LOGIN)",
+            "Password=$($env:MT5_PASSWORD)",
+            "Server=$($env:MT5_SERVER)",
+            'KeepPrivate=0','NewsEnable=0','CertInstall=0','',
+            '[Charts]','MaxBars=1000000','',
+            '[Experts]','AllowLiveTrading=0','AllowDllImport=0','Enabled=0'
+          ) | Set-Content $cfg -Encoding Unicode
+          $p=Start-Process -FilePath "$root\terminal64.exe" -ArgumentList @('/portable',"/config:$cfg") -PassThru
+          Start-Sleep 45
+          if(-not $p.HasExited){ $p.Kill() }
+          Get-Process terminal64 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+      - name: Build exact report preset
+        shell: pwsh
+        run: |
+          $root=$env:MT5_ROOT
+          $tester=Join-Path $root 'MQL5\Profiles\Tester'
+          New-Item -ItemType Directory -Force -Path $tester | Out-Null
+          $out=Join-Path $tester 'FVG_V2_12_R943K_CONTROL.set'
+          $plain=Get-Content 'research/control/FVG_V2_12_R943K_CONTROL.set'
+          $lines=@()
+          foreach($line in $plain){
+            if([string]::IsNullOrWhiteSpace($line)){ continue }
+            $parts=$line.Split('=',2)
+            if($parts.Count -ne 2){ continue }
+            $name=$parts[0]; $value=$parts[1]
+            if($name -eq 'InpTelemetryFile'){ $lines += "$name=$value" }
+            else { $lines += "$name=$value||$value||0||$value||N" }
+          }
+          $lines | Set-Content $out -Encoding Unicode
+
+      - name: Run exact-period tick-mode reproductions
+        shell: pwsh
+        env:
+          MT5_LOGIN: ${{ secrets.MT5_DEMO_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_DEMO_INVESTOR_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_DEMO_SERVER }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=$env:MT5_ROOT
+          $artifact='v212_control_artifact'
+          New-Item -ItemType Directory -Force -Path $artifact | Out-Null
+          function Run-Control([string]$name,[int]$model){
+            Write-Host "=== $name Model=$model ==="
+            $cfg=Join-Path $env:RUNNER_TEMP "$name.ini"
+            @(
+              '[Common]',
+              "Login=$($env:MT5_LOGIN)",
+              "Password=$($env:MT5_PASSWORD)",
+              "Server=$($env:MT5_SERVER)",
+              'KeepPrivate=0','NewsEnable=0','CertInstall=0','',
+              '[Experts]','AllowLiveTrading=0','AllowDllImport=0','Enabled=1','Account=0','Profile=0','',
+              '[Tester]',
+              'Expert=AUREON\FVG_Scalper_V2_12_Research',
+              'ExpertParameters=FVG_V2_12_R943K_CONTROL.set',
+              'Symbol=XAUUSD','Period=M1','Deposit=800','Currency=ZAR','Leverage=100',
+              "Model=$model",
+              'ExecutionMode=0','Optimization=0','ForwardMode=0','UseCloud=0','Visual=0',
+              'FromDate=2026.09.01','ToDate=2026.09.24',
+              "Report=reports\$name",
+              'ReplaceReport=1','ShutdownTerminal=1'
+            ) | Set-Content $cfg -Encoding Unicode
+            $reportDir=Join-Path $root 'reports'
+            New-Item -ItemType Directory -Force -Path $reportDir | Out-Null
+            $p=Start-Process -FilePath "$root\terminal64.exe" -ArgumentList @('/portable',"/config:$cfg") -PassThru
+            if(-not $p.WaitForExit(1500000)){ $p.Kill(); throw "$name timed out" }
+            Start-Sleep 4
+            Get-Process terminal64 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            $report=Join-Path $reportDir "$name.htm"
+            if(-not (Test-Path $report)){
+              $alt=Get-ChildItem $root -Recurse -Filter "$name*.htm" -ErrorAction SilentlyContinue | Select-Object -First 1
+              if($alt){ $report=$alt.FullName }
+            }
+            if(-not (Test-Path $report)){ throw "No report for $name" }
+            Copy-Item $report "$artifact\$name.htm"
+          }
+          Run-Control 'v212_model4_real_ticks' 4
+          Run-Control 'v212_model0_every_tick' 0
+
+      - name: Compare reproductions to R943k control
+        shell: pwsh
+        run: |
+          python scripts/parse_mt5_report.py v212_control_artifact/v212_model4_real_ticks.htm v212_control_artifact/v212_model0_every_tick.htm --benchmark research/control/benchmark.json --out v212_control_artifact/comparison.json
+          Copy-Item research/control/benchmark.json v212_control_artifact/benchmark.json
+          Copy-Item research/control/FVG_V2_12_R943K_CONTROL.set v212_control_artifact/FVG_V2_12_R943K_CONTROL.set
+
+      - name: Upload reproduction evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: AUREON_V212_CONTROL_REPRODUCTION
+          path: v212_control_artifact
+          retention-days: 14
+          if-no-files-found: error
