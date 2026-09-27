@@ -39,6 +39,28 @@ jobs:
       - name: Show cTrader CLI version
         run: docker run --rm ghcr.io/spotware/ctrader-console:latest --version
 
+      - name: Probe official cTrader scaffold
+        run: |
+          rm -rf /tmp/calgo-probe
+          mkdir -p /tmp/calgo-probe
+          docker run --rm \
+            -v "/tmp/calgo-probe:/root/cAlgo" \
+            ghcr.io/spotware/ctrader-console:latest \
+            create cbot ProbeBot
+          echo "=== OFFICIAL CONFIG ==="
+          cat /tmp/calgo-probe/Sources/Robots/ProbeBot/ProbeBot/config.json
+          echo "=== OFFICIAL GLOBAL USINGS ==="
+          cat /tmp/calgo-probe/Sources/Robots/ProbeBot/ProbeBot/GlobalUsings.cs
+          echo "=== OFFICIAL BOT SOURCE ==="
+          cat /tmp/calgo-probe/Sources/Robots/ProbeBot/ProbeBot/ProbeBot.cs
+          echo "=== BUILD OFFICIAL PROBE ==="
+          docker run --rm \
+            -v "/tmp/calgo-probe:/root/cAlgo" \
+            ghcr.io/spotware/ctrader-console:latest \
+            build /root/cAlgo/Sources/Robots/ProbeBot/ProbeBot/ProbeBot.csproj
+          echo "=== GENERATED ALGOS ==="
+          find /tmp/calgo-probe -type f -name '*.algo' -print
+
       - name: Build AUREON PRIME with cTrader CLI
         run: |
           docker run --rm \
