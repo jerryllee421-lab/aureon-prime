@@ -2,6 +2,10 @@ name: AUREON MT5 Broker Probe
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'ops/run-broker-probe.txt'
 
 permissions:
   contents: read
