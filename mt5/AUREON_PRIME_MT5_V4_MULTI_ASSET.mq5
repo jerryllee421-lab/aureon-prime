@@ -4,8 +4,8 @@
 //| Timer-driven dual-symbol execution and shared portfolio governor.  |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "4.00"
-#property description "AUREON PRIME V4: single-terminal multi-asset MT5 engine for Gold and Bitcoin demo-forward automation with shared risk, FVG/displacement intelligence, MTF context, controlled re-entry, broker-aware sizing and adaptive management."
+#property version   "4.10"
+#property description "AUREON PRIME V4.10: single-terminal Gold/Bitcoin demo-forward engine with PrimeXBT-safe BTCUSDT risk fallback, server OrderCheck preflight, shared portfolio risk, MTF FVG intelligence and adaptive management."
 
 #include <Trade/Trade.mqh>
 CTrade trade;
@@ -133,6 +133,10 @@ input int InpBitcoinMaxTradesDay = 18;
 input double InpBitcoinRewardRisk = 15.0;
 input int InpBitcoinMaxSpreadPoints = 0;
 input bool InpBitcoinAllowWeekend = true;
+input bool InpUseBitcoinManualRiskFallback = true;
+input double InpBitcoinUSTUSDConversion = 1.0;
+input double InpBitcoinFallbackRiskSafetyMultiplier = 1.05;
+input bool InpRequireBitcoinServerOrderCheck = true;
 
 //--------------------------- Signal model -----------------------------
 input group "FVG / Displacement"
@@ -1021,6 +1025,63 @@ bool OpenTrade(AssetState &a,bool bullish)
    return true;
 }
 
+bool EstimateStopLossMoney(AssetState &a,double entry,double sl,bool bullish,double volume,
+                           double &lossMoney,bool &usedFallback)
+{
+   lossMoney=0.0;
+   usedFallback=false;
+
+   ENUM_ORDER_TYPE type=bullish?ORDER_TYPE_BUY:ORDER_TYPE_SELL;
+   double brokerCalc=0.0;
+   ResetLastError();
+   bool brokerOK=OrderCalcProfit(type,a.symbol,volume,entry,sl,brokerCalc);
+
+   if(brokerOK && MathAbs(brokerCalc)>1e-8)
+   {
+      lossMoney=MathAbs(brokerCalc);
+      return true;
+   }
+
+   // PrimeXBT demo catalogue validation (2026-09-27) showed BTCUSDT as
+   // fully tradable while SYMBOL_TRADE_TICK_VALUE and OrderCalcProfit()
+   // returned zero because the instrument profit currency is UST. Fail
+   // closed for every other instrument; only the validated BTCUSDT-style
+   // contract can use this conservative fallback.
+   if(!InpUseBitcoinManualRiskFallback || a.kind!=AUREON_KIND_BITCOIN)
+      return false;
+
+   string upper=a.symbol;
+   StringToUpper(upper);
+   if(StringFind(upper,"BTCUSDT")<0)
+      return false;
+
+   string accountCurrency=AccountInfoString(ACCOUNT_CURRENCY);
+   string profitCurrency=SymbolInfoString(a.symbol,SYMBOL_CURRENCY_PROFIT);
+   if(accountCurrency!="USD" || (profitCurrency!="UST" && profitCurrency!="USDT"))
+      return false;
+
+   double contract=SymbolInfoDouble(a.symbol,SYMBOL_TRADE_CONTRACT_SIZE);
+   if(contract<=0.0 || InpBitcoinUSTUSDConversion<=0.0 ||
+      InpBitcoinFallbackRiskSafetyMultiplier<1.0)
+      return false;
+
+   // MQL5 CFD/CFD-index profit formula:
+   // (close-open) * contract_size * lots. Convert UST/USDT to account USD
+   // using the explicit profile factor, then overstate risk by the safety
+   // multiplier so sizing remains conservative.
+   double nativeLoss=MathAbs(entry-sl)*contract*volume;
+   lossMoney=nativeLoss*InpBitcoinUSTUSDConversion*InpBitcoinFallbackRiskSafetyMultiplier;
+   usedFallback=(lossMoney>0.0);
+
+   if(usedFallback && InpVerboseLog)
+      Print("AUREON V4.10 BTC risk fallback | symbol=",a.symbol,
+            " profitCurrency=",profitCurrency,
+            " loss=",DoubleToString(lossMoney,2),
+            " volume=",DoubleToString(volume,4));
+
+   return lossMoney>0.0;
+}
+
 bool CalculateVolume(AssetState &a,double entry,double sl,bool bullish,
                      double scale,double zoneRemainingPct,
                      double &volume,double &riskMoney,double &riskPct)
@@ -1038,13 +1099,11 @@ bool CalculateVolume(AssetState &a,double entry,double sl,bool bullish,
 
    if(targetPct<=0.0) return false;
 
-   ENUM_ORDER_TYPE type=bullish?ORDER_TYPE_BUY:ORDER_TYPE_SELL;
    double oneLotLoss=0.0;
-
-   if(!OrderCalcProfit(type,a.symbol,1.0,entry,sl,oneLotLoss))
+   bool usedFallback=false;
+   if(!EstimateStopLossMoney(a,entry,sl,bullish,1.0,oneLotLoss,usedFallback))
       return false;
 
-   oneLotLoss=MathAbs(oneLotLoss);
    if(oneLotLoss<=0.0) return false;
 
    double targetMoney=equity*targetPct/100.0;
@@ -1064,11 +1123,10 @@ bool CalculateVolume(AssetState &a,double entry,double sl,bool bullish,
    if(volume<minLot)
       return false;
 
-   double calcLoss=0.0;
-   if(!OrderCalcProfit(type,a.symbol,volume,entry,sl,calcLoss))
+   bool finalFallback=false;
+   if(!EstimateStopLossMoney(a,entry,sl,bullish,volume,riskMoney,finalFallback))
       return false;
 
-   riskMoney=MathAbs(calcLoss);
    riskPct=riskMoney/equity*100.0;
 
    if(riskPct>targetPct+1e-6)
@@ -1271,16 +1329,70 @@ void UpdateSpreadState(AssetState &a)
 bool MarginPreflight(AssetState &a,bool bullish,double volume,double entry)
 {
    ENUM_ORDER_TYPE type=bullish?ORDER_TYPE_BUY:ORDER_TYPE_SELL;
-   double required=0.0;
-
-   if(!OrderCalcMargin(type,a.symbol,volume,entry,required))
-      return false;
 
    double equity=AccountInfoDouble(ACCOUNT_EQUITY);
    double currentMargin=AccountInfoDouble(ACCOUNT_MARGIN);
    double freeMargin=AccountInfoDouble(ACCOUNT_MARGIN_FREE);
+   if(equity<=0.0 || freeMargin<=0.0)
+      return false;
 
-   if(equity<=0.0 || freeMargin<=0.0 || required>freeMargin)
+   // First ask MT5/broker to validate the exact market request. OrderCheck()
+   // does not send the order. For PrimeXBT BTCUSDT this is mandatory because
+   // the catalogue's client-side OrderCalcMargin metadata currently resolves
+   // to zero.
+   MqlTradeRequest request={};
+   MqlTradeCheckResult check={};
+   request.action=TRADE_ACTION_DEAL;
+   request.symbol=a.symbol;
+   request.volume=volume;
+   request.type=type;
+   request.price=entry;
+   request.deviation=InpDeviationPoints;
+   request.magic=a.magic;
+
+   ResetLastError();
+   bool checkOK=OrderCheck(request,check);
+
+   if(checkOK && check.retcode==0)
+   {
+      double incremental=MathMax(0.0,check.margin-currentMargin);
+
+      if(check.margin_free<=0.0)
+         return false;
+
+      if(InpMaxSingleTradeMarginPct>0.0 &&
+         incremental/equity*100.0>InpMaxSingleTradeMarginPct)
+         return false;
+
+      if(InpMinProjectedMarginLevelPct>0.0 &&
+         check.margin>0.0 &&
+         check.margin_level<InpMinProjectedMarginLevelPct)
+         return false;
+
+      if(a.kind==AUREON_KIND_BITCOIN && incremental<=0.0)
+      {
+         if(InpVerboseLog)
+            Print("AUREON V4.10 BTC OrderCheck returned zero incremental margin; entry rejected.");
+         return false;
+      }
+
+      return true;
+   }
+
+   if(a.kind==AUREON_KIND_BITCOIN && InpRequireBitcoinServerOrderCheck)
+   {
+      if(InpVerboseLog)
+         Print("AUREON V4.10 BTC OrderCheck rejected/preflight unavailable | retcode=",
+               check.retcode," comment=",check.comment," err=",GetLastError());
+      return false;
+   }
+
+   // Gold and non-BTC fallback: retain client-side margin calculation.
+   double required=0.0;
+   if(!OrderCalcMargin(type,a.symbol,volume,entry,required) || required<=0.0)
+      return false;
+
+   if(required>freeMargin)
       return false;
 
    if(InpMaxSingleTradeMarginPct>0.0 &&
@@ -1288,7 +1400,6 @@ bool MarginPreflight(AssetState &a,bool bullish,double volume,double entry)
       return false;
 
    double projected=currentMargin+required;
-
    if(projected>0.0 && InpMinProjectedMarginLevelPct>0.0)
    {
       double projectedLevel=equity/projected*100.0;
@@ -1734,6 +1845,10 @@ bool ValidateInputs()
       return false;
 
    if(InpGoldRiskPct<=0.0 || InpBitcoinRiskPct<=0.0)
+      return false;
+
+   if(InpBitcoinUSTUSDConversion<=0.0 ||
+      InpBitcoinFallbackRiskSafetyMultiplier<1.0)
       return false;
 
    return true;
