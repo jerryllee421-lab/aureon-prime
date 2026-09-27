@@ -1,0 +1,12 @@
+InpExecutionArmed=false||false||0||true||N
+InpDemoOnly=true||false||0||true||N
+InpEnableGold=true||false||0||true||N
+InpEnableBitcoin=true||false||0||true||N
+InpGoldSymbol=XAUUSD
+InpBitcoinSymbol=BTCUSDT
+InpGoldRiskPct=0.50||0.10||0.05||1.00||N
+InpBitcoinRiskPct=0.35||0.10||0.05||1.00||N
+InpPortfolioMaxOpenPositions=2||1||1||4||N
+InpPortfolioDailyLossPct=2.0||1.0||0.25||5.0||N
+InpPortfolioHardStopDDPct=8.0||4.0||0.5||12.0||N
+InpEnableTelemetry=true||false||0||true||N

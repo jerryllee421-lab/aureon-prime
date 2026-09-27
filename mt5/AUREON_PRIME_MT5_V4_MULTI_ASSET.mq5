@@ -461,10 +461,21 @@ string ResolveSymbol(int kind,string configured)
 {
    if(StringLen(configured)>0)
    {
-      if(SymbolSelect(configured,true))
-         return configured;
-      Print("AUREON V4 configured symbol unavailable: ",configured);
-      return "";
+      if(!SymbolSelect(configured,true))
+      {
+         Print("AUREON V4 configured symbol unavailable: ",configured);
+         return "";
+      }
+
+      long configuredMode=SymbolInfoInteger(configured,SYMBOL_TRADE_MODE);
+      if(configuredMode!=SYMBOL_TRADE_MODE_FULL)
+      {
+         Print("AUREON V4 configured symbol is not fully tradable: ",configured,
+               " tradeMode=",configuredMode);
+         return "";
+      }
+
+      return configured;
    }
 
    string best="";
@@ -504,7 +515,14 @@ string ResolveSymbol(int kind,string configured)
       }
 
       long tradeMode=SymbolInfoInteger(sym,SYMBOL_TRADE_MODE);
-      if(tradeMode==SYMBOL_TRADE_MODE_FULL) score+=5;
+
+      // Never select a disabled/close-only broker symbol merely because its
+      // name looks canonical. PrimeXBT exposes BTCUSD in the catalogue while
+      // BTCUSDT is the fully tradable Bitcoin CFD on the validated demo server.
+      if(tradeMode!=SYMBOL_TRADE_MODE_FULL)
+         continue;
+
+      score+=100;
 
       if(score>bestScore)
       {
