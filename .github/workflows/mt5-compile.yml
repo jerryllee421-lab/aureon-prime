@@ -1,0 +1,107 @@
+name: AUREON PRIME MT5 Compile
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'mt5/**'
+      - 'scripts/validate-mt5-source.py'
+      - '.github/workflows/mt5-compile.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'mt5/**'
+      - 'scripts/validate-mt5-source.py'
+      - '.github/workflows/mt5-compile.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aureon-mt5-compile-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MT5_INSTALLER_URL: https://download.terminal.free/cdn/web/metaquotes.ltd/mt5/mt5setup.exe
+  EA_SOURCE: mt5/AUREON_PRIME_MT5_V3_00_DUAL_ASSET.mq5
+
+jobs:
+  compile:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate source safety
+        shell: pwsh
+        run: python scripts/validate-mt5-source.py
+
+      - name: Install official MetaTrader 5
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root='C:\AUREON_MT5'
+          $installer=Join-Path $env:RUNNER_TEMP 'mt5setup.exe'
+
+          Invoke-WebRequest -Uri $env:MT5_INSTALLER_URL -OutFile $installer
+          if((Get-Item $installer).Length -lt 100000){ throw 'MT5 installer download is unexpectedly small' }
+
+          $p=Start-Process -FilePath $installer -ArgumentList @('/auto',"/path:$root") -PassThru
+          if(-not $p.WaitForExit(600000)){ $p.Kill(); throw 'MT5 installer timed out' }
+
+          $deadline=(Get-Date).AddMinutes(3)
+          while((Get-Date) -lt $deadline -and -not (Test-Path "$root\metaeditor64.exe")){ Start-Sleep -Seconds 2 }
+          if(-not (Test-Path "$root\metaeditor64.exe")){ throw 'metaeditor64.exe not found after install' }
+
+          "MT5_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          & "$root\terminal64.exe" /portable
+          Start-Sleep -Seconds 8
+          Get-Process terminal64 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+      - name: Compile AUREON PRIME EA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=$env:MT5_ROOT
+          $mql5=Join-Path $root 'MQL5'
+          $destDir=Join-Path $mql5 'Experts\AUREON'
+          $artifact='mt5_compile_artifact'
+
+          New-Item -ItemType Directory -Force -Path $destDir,$artifact | Out-Null
+
+          $dest=Join-Path $destDir 'AUREON_PRIME_MT5_V3_00_DUAL_ASSET.mq5'
+          Copy-Item $env:EA_SOURCE $dest -Force
+
+          $meta=Join-Path $root 'metaeditor64.exe'
+          $p=Start-Process -FilePath $meta -ArgumentList @("/compile:$dest","/include:$mql5",'/log') -PassThru
+          if(-not $p.WaitForExit(180000)){ $p.Kill(); throw 'MetaEditor compile timed out' }
+          Start-Sleep -Seconds 2
+
+          $ex5=[IO.Path]::ChangeExtension($dest,'.ex5')
+          $log=[IO.Path]::ChangeExtension($dest,'.log')
+
+          if(-not (Test-Path $log)){ throw 'MetaEditor did not create a compile log' }
+          $bytes=[IO.File]::ReadAllBytes($log)
+          $txt=[Text.Encoding]::Unicode.GetString($bytes)
+          $txt | Out-File "$artifact\compile.log" -Encoding utf8
+          Write-Host $txt
+
+          if(-not (Test-Path $ex5)){ throw 'Compilation did not produce EX5' }
+          if($txt -notmatch '0 errors'){ throw 'Compiler did not confirm zero errors' }
+
+          Copy-Item $env:EA_SOURCE "$artifact\AUREON_PRIME_MT5_V3_00_DUAL_ASSET.mq5"
+          Copy-Item $ex5 "$artifact\AUREON_PRIME_MT5_V3_00_DUAL_ASSET.ex5"
+          (Get-FileHash $env:EA_SOURCE -Algorithm SHA256).Hash | Set-Content "$artifact\source.sha256"
+          (Get-FileHash $ex5 -Algorithm SHA256).Hash | Set-Content "$artifact\ex5.sha256"
+          'AUREON_PRIME_MT5_COMPILE_PASSED' | Set-Content "$artifact\status.txt"
+
+      - name: Upload compiled EA
+        uses: actions/upload-artifact@v4
+        with:
+          name: AUREON_PRIME_MT5_V3
+          path: mt5_compile_artifact
+          retention-days: 14
+          if-no-files-found: error
