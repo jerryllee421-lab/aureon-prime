@@ -1,0 +1,278 @@
+name: AUREON PRIME Phase 2 Research
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'ops/run-phase2-research.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aureon-prime-phase2-research
+  cancel-in-progress: true
+
+env:
+  MT5_INSTALLER_URL: https://download.terminal.free/cdn/web/pxbt.trading.ltd/mt5/pxbttrading5setup.exe
+  EA_SOURCE: mt5/AUREON_PRIME_MT5_V4_MULTI_ASSET.mq5
+
+jobs:
+  research:
+    runs-on: windows-latest
+    timeout-minutes: 55
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Require read-only demo credentials
+        shell: pwsh
+        env:
+          MT5_LOGIN: ${{ secrets.MT5_DEMO_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_DEMO_INVESTOR_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_DEMO_SERVER }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if([string]::IsNullOrWhiteSpace($env:MT5_LOGIN)){ throw 'Missing MT5_DEMO_LOGIN secret' }
+          if([string]::IsNullOrWhiteSpace($env:MT5_PASSWORD)){ throw 'Missing MT5_DEMO_INVESTOR_PASSWORD secret' }
+          if([string]::IsNullOrWhiteSpace($env:MT5_SERVER)){ throw 'Missing MT5_DEMO_SERVER secret' }
+
+      - name: Install PrimeXBT MT5
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root='C:\AUREON_MT5'
+          $installer=Join-Path $env:RUNNER_TEMP 'pxbttrading5setup.exe'
+          Invoke-WebRequest -Uri $env:MT5_INSTALLER_URL -OutFile $installer
+          $p=Start-Process -FilePath $installer -ArgumentList @('/auto',"/path:$root") -PassThru
+          if(-not $p.WaitForExit(600000)){ $p.Kill(); throw 'MT5 installer timed out' }
+          $deadline=(Get-Date).AddMinutes(3)
+          while((Get-Date) -lt $deadline -and -not (Test-Path "$root\metaeditor64.exe")){ Start-Sleep -Seconds 2 }
+          if(-not (Test-Path "$root\metaeditor64.exe")){ throw 'MetaEditor not found' }
+          "MT5_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          & "$root\terminal64.exe" /portable
+          Start-Sleep -Seconds 8
+          Get-Process terminal64 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+      - name: Compile AUREON V4.11
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=$env:MT5_ROOT
+          $mql5=Join-Path $root 'MQL5'
+          $destDir=Join-Path $mql5 'Experts\AUREON'
+          New-Item -ItemType Directory -Force -Path $destDir | Out-Null
+          $dest=Join-Path $destDir 'AUREON_PRIME_MT5_V4_MULTI_ASSET.mq5'
+          Copy-Item $env:EA_SOURCE $dest -Force
+          $meta=Join-Path $root 'metaeditor64.exe'
+          $p=Start-Process -FilePath $meta -ArgumentList @("/compile:$dest","/include:$mql5",'/log') -PassThru
+          if(-not $p.WaitForExit(180000)){ $p.Kill(); throw 'Compile timed out' }
+          Start-Sleep -Seconds 2
+          $ex5=[IO.Path]::ChangeExtension($dest,'.ex5')
+          $log=[IO.Path]::ChangeExtension($dest,'.log')
+          if(-not (Test-Path $ex5)){ throw 'EX5 missing' }
+          $txt=[Text.Encoding]::Unicode.GetString([IO.File]::ReadAllBytes($log))
+          Write-Host $txt
+          if($txt -notmatch '0 errors' -or $txt -notmatch '0 warnings'){ throw 'Compiler validation failed' }
+
+      - name: Run Phase 2 matrix
+        shell: pwsh
+        env:
+          MT5_LOGIN: ${{ secrets.MT5_DEMO_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_DEMO_INVESTOR_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_DEMO_SERVER }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=$env:MT5_ROOT
+          $testerDir=Join-Path $root 'MQL5\Profiles\Tester'
+          $artifact='phase2_artifact'
+          New-Item -ItemType Directory -Force -Path $testerDir,$artifact,(Join-Path $root 'reports') | Out-Null
+          $to=(Get-Date).Date.AddDays(-1)
+          $from=$to.AddDays(-30)
+
+          function Run-Test {
+            param([string]$Name,[string]$Symbol,[string]$Period,[string[]]$Inputs)
+
+            $setName="$Name.set"
+            $setPath=Join-Path $testerDir $setName
+            $Inputs | Set-Content -Path $setPath -Encoding Unicode
+
+            $cfg=Join-Path $env:RUNNER_TEMP "$Name.ini"
+            $cfgLines=@(
+              '[Common]',
+              "Login=$($env:MT5_LOGIN)",
+              "Password=$($env:MT5_PASSWORD)",
+              "Server=$($env:MT5_SERVER)",
+              'KeepPrivate=0',
+              'NewsEnable=0',
+              'CertInstall=0',
+              '',
+              '[Experts]',
+              'AllowLiveTrading=0',
+              'AllowDllImport=0',
+              'Enabled=1',
+              'Account=0',
+              'Profile=0',
+              '',
+              '[Tester]',
+              'Expert=AUREON\AUREON_PRIME_MT5_V4_MULTI_ASSET',
+              "ExpertParameters=$setName",
+              "Symbol=$Symbol",
+              "Period=$Period",
+              'Deposit=10000',
+              'Currency=USD',
+              'Leverage=100',
+              'Model=1',
+              'ExecutionMode=0',
+              'Optimization=0',
+              'ForwardMode=0',
+              'UseCloud=0',
+              'Visual=0',
+              "FromDate=$($from.ToString('yyyy.MM.dd'))",
+              "ToDate=$($to.ToString('yyyy.MM.dd'))",
+              "Report=reports\$Name",
+              'ReplaceReport=1',
+              'ShutdownTerminal=1'
+            )
+            $cfgLines | Set-Content -Path $cfg -Encoding Unicode
+
+            Write-Host "=== $Name ==="
+            $terminal=Join-Path $root 'terminal64.exe'
+            $p=Start-Process -FilePath $terminal -ArgumentList @('/portable',"/config:$cfg") -PassThru
+            if(-not $p.WaitForExit(1200000)){ $p.Kill(); throw "Tester timeout: $Name" }
+            Start-Sleep -Seconds 3
+            Get-Process terminal64 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+            $report=Join-Path $root "reports\$Name.htm"
+            if(-not (Test-Path $report)){
+              $alt=Get-ChildItem -Path $root -Recurse -Filter "$Name*.htm" -ErrorAction SilentlyContinue | Select-Object -First 1
+              if($alt){ $report=$alt.FullName }
+            }
+            if(-not (Test-Path $report)){ throw "Report missing: $Name" }
+
+            Copy-Item $report "$artifact\$Name.htm"
+            Copy-Item $setPath "$artifact\$Name.set"
+          }
+
+          $common=@(
+            'InpExecutionArmed=true||false||0||true||N',
+            'InpDemoOnly=true||false||0||true||N',
+            'InpPortfolioMaxOpenPositions=1||1||1||2||N',
+            'InpPortfolioDailyLossPct=2.0||1.0||0.25||5.0||N',
+            'InpPortfolioHardStopDDPct=8.0||4.0||0.5||12.0||N',
+            'InpEnableTelemetry=false||false||0||true||N'
+          )
+
+          $goldM5Long=$common + @(
+            'InpEnableGold=true||false||0||true||N',
+            'InpEnableBitcoin=false||false||0||true||N',
+            'InpGoldSymbol=XAUUSD',
+            'InpGoldEntryTF=5',
+            'InpGoldRegimeTF=15',
+            'InpGoldRiskPct=0.35||0.10||0.05||1.00||N',
+            'InpGoldLongRiskScale=1.00||0.50||0.05||1.00||N',
+            'InpGoldShortRiskScale=0.00||0.00||0.05||1.00||N',
+            'InpGoldMinLongQuality=72.0||55.0||1.0||90.0||N',
+            'InpGoldLongMinAlignedVotes=2||0||1||3||N',
+            'InpGoldMaxAttemptsPerFVG=1||1||1||2||N',
+            'InpGoldRewardRisk=2.5||1.5||0.5||6.0||N',
+            'InpMinFVG_ATR=0.20||0.10||0.05||0.50||N',
+            'InpMinBody_ATR=0.80||0.40||0.10||1.50||N',
+            'InpMinBodyRatio=0.65||0.55||0.05||0.85||N',
+            'InpRequireMidpoint=true||false||0||true||N',
+            'InpSL_ATR_Buffer=0.35||0.15||0.05||0.75||N',
+            'InpMaxSL_ATR=2.0||1.0||0.25||3.0||N',
+            'InpMinADX=20.0||15.0||1.0||30.0||N',
+            'InpMinATRRatio=0.50||0.30||0.05||0.80||N',
+            'InpMaxATRRatio=1.60||1.20||0.10||2.00||N',
+            'InpUseControlledReentry=false||false||0||true||N'
+          )
+
+          $goldM15Long=$common + @(
+            'InpEnableGold=true||false||0||true||N',
+            'InpEnableBitcoin=false||false||0||true||N',
+            'InpGoldSymbol=XAUUSD',
+            'InpGoldEntryTF=15',
+            'InpGoldRegimeTF=16385',
+            'InpGoldRiskPct=0.30||0.10||0.05||1.00||N',
+            'InpGoldLongRiskScale=1.00||0.50||0.05||1.00||N',
+            'InpGoldShortRiskScale=0.00||0.00||0.05||1.00||N',
+            'InpGoldMinLongQuality=70.0||55.0||1.0||90.0||N',
+            'InpGoldLongMinAlignedVotes=2||0||1||3||N',
+            'InpGoldMaxAttemptsPerFVG=1||1||1||2||N',
+            'InpGoldRewardRisk=2.5||1.5||0.5||6.0||N',
+            'InpMinFVG_ATR=0.20||0.10||0.05||0.50||N',
+            'InpMinBody_ATR=0.70||0.40||0.10||1.50||N',
+            'InpMinBodyRatio=0.65||0.55||0.05||0.85||N',
+            'InpRequireMidpoint=true||false||0||true||N',
+            'InpSL_ATR_Buffer=0.40||0.15||0.05||0.80||N',
+            'InpMaxSL_ATR=2.5||1.0||0.25||3.5||N',
+            'InpMinADX=20.0||15.0||1.0||30.0||N',
+            'InpUseControlledReentry=false||false||0||true||N'
+          )
+
+          $btcCandidate=$common + @(
+            'InpEnableGold=false||false||0||true||N',
+            'InpEnableBitcoin=true||false||0||true||N',
+            'InpBitcoinSymbol=BTCUSDT',
+            'InpBitcoinEntryTF=5',
+            'InpBitcoinRegimeTF=16385',
+            'InpBitcoinRiskPct=0.25||0.10||0.05||0.75||N',
+            'InpBitcoinLongRiskScale=1.00||0.50||0.05||1.00||N',
+            'InpBitcoinShortRiskScale=1.00||0.50||0.05||1.00||N',
+            'InpBitcoinMinLongQuality=50.0||40.0||1.0||80.0||N',
+            'InpBitcoinMinShortQuality=50.0||40.0||1.0||80.0||N',
+            'InpBitcoinLongMinAlignedVotes=1||0||1||3||N',
+            'InpBitcoinShortMinAlignedVotes=1||0||1||3||N',
+            'InpBitcoinMaxAttemptsPerFVG=1||1||1||2||N',
+            'InpBitcoinRewardRisk=3.0||1.5||0.5||6.0||N',
+            'InpMaxSpreadATRRatio=0.50||0.10||0.05||1.00||N',
+            'InpRelativeSpreadMultiplier=4.0||2.0||0.25||6.0||N',
+            'InpSpreadEMAWarmupTicks=50||20||10||200||N',
+            'InpMinFVG_ATR=0.20||0.10||0.05||0.50||N',
+            'InpMinBody_ATR=0.70||0.40||0.10||1.50||N',
+            'InpMinBodyRatio=0.60||0.50||0.05||0.80||N',
+            'InpUseControlledReentry=false||false||0||true||N',
+            'InpUseBitcoinManualRiskFallback=true||false||0||true||N',
+            'InpBitcoinUSTUSDConversion=1.0||0.95||0.01||1.05||N',
+            'InpBitcoinFallbackRiskSafetyMultiplier=1.05||1.00||0.01||1.20||N',
+            'InpRequireBitcoinServerOrderCheck=true||false||0||true||N',
+            'InpVerboseLog=true||false||0||true||N'
+          )
+
+          Run-Test 'gold_m5_long_only_30d' 'XAUUSD' 'M1' $goldM5Long
+          Run-Test 'gold_m15_long_only_30d' 'XAUUSD' 'M1' $goldM15Long
+          Run-Test 'btc_candidate_30d' 'BTCUSDT' 'M5' $btcCandidate
+
+          Copy-Item $env:EA_SOURCE "$artifact\AUREON_PRIME_MT5_V4_MULTI_ASSET.mq5"
+
+          $recent=Get-ChildItem -Path $root -Recurse -Filter '*.log' -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -gt (Get-Date).AddMinutes(-15) } |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 10
+          New-Item -ItemType Directory -Force -Path "$artifact\logs" | Out-Null
+          foreach($lf in $recent){
+            $safe=($lf.FullName.Substring($root.Length).TrimStart('\') -replace '[\\/:*?"<>|]','_')
+            Copy-Item $lf (Join-Path "$artifact\logs" $safe) -Force -ErrorAction SilentlyContinue
+          }
+
+          @(
+            "from=$($from.ToString('yyyy.MM.dd'))",
+            "to=$($to.ToString('yyyy.MM.dd'))",
+            'deposit=10000',
+            'currency=USD',
+            'leverage=1:100',
+            'model=1_minute_ohlc',
+            'broker_orders_sent=NO',
+            'scenarios=gold_m5_long_only_30d,gold_m15_long_only_30d,btc_candidate_30d'
+          ) | Set-Content "$artifact\manifest.txt" -Encoding utf8
+
+      - name: Upload Phase 2 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: AUREON_PRIME_PHASE2_RESEARCH_30D
+          path: phase2_artifact
+          retention-days: 14
+          if-no-files-found: error
