@@ -1,0 +1,4 @@
+purpose=PrimeXBT native 30-day AUREON V4.10 multi-asset Strategy Tester
+mode=1-minute OHLC
+credentials=investor read-only
+broker_orders=none
